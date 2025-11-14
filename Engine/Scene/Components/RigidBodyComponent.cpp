@@ -1,0 +1,143 @@
+#include "RigidBodyComponent.hpp"
+#include "TransformComponent.hpp"
+#include "../Entity.hpp"
+#include "../Scene.hpp"
+
+namespace GameEngine {
+
+    RigidBodyComponent::RigidBodyComponent() {
+    }
+
+    nlohmann::json RigidBodyComponent::Serialize() const {
+        nlohmann::json j;
+        j["type"] = GetTypeName();
+        j["enabled"] = Enabled;
+        j["bodyType"] = static_cast<int>(Type);
+        j["mass"] = Mass;
+        j["linearDamping"] = LinearDamping;
+        j["angularDamping"] = AngularDamping;
+        j["useGravity"] = UseGravity;
+        j["isKinematic"] = IsKinematic;
+        j["linearVelocity"] = { LinearVelocity.x, LinearVelocity.y, LinearVelocity.z };
+        j["angularVelocity"] = { AngularVelocity.x, AngularVelocity.y, AngularVelocity.z };
+        return j;
+    }
+
+    void RigidBodyComponent::Deserialize(const nlohmann::json& data) {
+        if (data.contains("enabled"))
+            Enabled = data["enabled"];
+        
+        if (data.contains("bodyType"))
+            Type = static_cast<BodyType>(data["bodyType"].get<int>());
+        
+        if (data.contains("mass"))
+            Mass = data["mass"];
+        
+        if (data.contains("linearDamping"))
+            LinearDamping = data["linearDamping"];
+        
+        if (data.contains("angularDamping"))
+            AngularDamping = data["angularDamping"];
+        
+        if (data.contains("useGravity"))
+            UseGravity = data["useGravity"];
+        
+        if (data.contains("isKinematic"))
+            IsKinematic = data["isKinematic"];
+        
+        if (data.contains("linearVelocity")) {
+            auto vel = data["linearVelocity"];
+            LinearVelocity = glm::vec3(vel[0], vel[1], vel[2]);
+        }
+        
+        if (data.contains("angularVelocity")) {
+            auto vel = data["angularVelocity"];
+            AngularVelocity = glm::vec3(vel[0], vel[1], vel[2]);
+        }
+    }
+
+    void RigidBodyComponent::OnCreate() {
+        // Create physics rigid body
+        Physics::RigidBody::BodyType physicsType;
+        switch (Type) {
+            case BodyType::Static:    physicsType = Physics::RigidBody::BodyType::Static; break;
+            case BodyType::Kinematic: physicsType = Physics::RigidBody::BodyType::Kinematic; break;
+            case BodyType::Dynamic:   physicsType = Physics::RigidBody::BodyType::Dynamic; break;
+        }
+        
+        m_RigidBody = CreateRef<Physics::RigidBody>(physicsType, Mass);
+        
+        // Set properties
+        m_RigidBody->SetLinearDamping(LinearDamping);
+        m_RigidBody->SetAngularDamping(AngularDamping);
+        m_RigidBody->SetUseGravity(UseGravity);
+        m_RigidBody->SetLinearVelocity(LinearVelocity);
+        m_RigidBody->SetAngularVelocity(AngularVelocity);
+        
+        // Sync initial position from transform
+        SyncFromTransform();
+        
+        // Register with physics world (if scene has one)
+        // TODO: Get physics world from scene and add rigid body
+    }
+
+    void RigidBodyComponent::OnDestroy() {
+        // Unregister from physics world
+        // TODO: Remove from physics world
+        m_RigidBody.reset();
+    }
+
+    void RigidBodyComponent::SyncFromTransform() {
+        if (!Owner || !m_RigidBody) return;
+        
+        if (Owner->HasComponent<TransformComponent>()) {
+            auto& transform = Owner->GetComponent<TransformComponent>();
+            m_RigidBody->SetPosition(transform.GetWorldPosition());
+            m_RigidBody->SetRotation(transform.GetWorldRotation());
+        }
+    }
+
+    void RigidBodyComponent::SyncToTransform() {
+        if (!Owner || !m_RigidBody) return;
+        
+        if (Owner->HasComponent<TransformComponent>()) {
+            auto& transform = Owner->GetComponent<TransformComponent>();
+            transform.SetWorldPosition(m_RigidBody->GetPosition());
+            transform.Rotation = m_RigidBody->GetRotation();
+        }
+    }
+
+    void RigidBodyComponent::ApplyForce(const glm::vec3& force) {
+        if (m_RigidBody) m_RigidBody->ApplyForce(force);
+    }
+
+    void RigidBodyComponent::ApplyForceAtPoint(const glm::vec3& force, const glm::vec3& point) {
+        if (m_RigidBody) m_RigidBody->ApplyForceAtPoint(force, point);
+    }
+
+    void RigidBodyComponent::ApplyTorque(const glm::vec3& torque) {
+        if (m_RigidBody) m_RigidBody->ApplyTorque(torque);
+    }
+
+    void RigidBodyComponent::ApplyImpulse(const glm::vec3& impulse) {
+        if (m_RigidBody) m_RigidBody->ApplyImpulse(impulse);
+    }
+
+    void RigidBodyComponent::SetLinearVelocity(const glm::vec3& velocity) {
+        LinearVelocity = velocity;
+        if (m_RigidBody) m_RigidBody->SetLinearVelocity(velocity);
+    }
+
+    glm::vec3 RigidBodyComponent::GetLinearVelocity() const {
+        return m_RigidBody ? m_RigidBody->GetLinearVelocity() : LinearVelocity;
+    }
+
+    void RigidBodyComponent::SetAngularVelocity(const glm::vec3& velocity) {
+        AngularVelocity = velocity;
+        if (m_RigidBody) m_RigidBody->SetAngularVelocity(velocity);
+    }
+
+    glm::vec3 RigidBodyComponent::GetAngularVelocity() const {
+        return m_RigidBody ? m_RigidBody->GetAngularVelocity() : AngularVelocity;
+    }
+}
