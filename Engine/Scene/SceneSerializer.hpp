@@ -61,6 +61,15 @@ namespace GameEngine {
         Ref<Scene> m_Scene;
         
         // Version for compatibility
-        static constexpr const char* SCENE_VERSION = "1.0.0";
+        static constexpr int SCENE_VERSION_MAJOR = 1;
+        static constexpr int SCENE_VERSION_MINOR = 0;
+        static constexpr int SCENE_VERSION_PATCH = 0;
+        static constexpr const char* SCENE_VERSION_STRING = "1.0.0";
+
+        /**
+         * @brief Migration functions
+         */
+        bool MigrateScene(nlohmann::json& data, int fromVersion, int toVersion);
+        bool MigrateV1ToV2(nlohmann::json& data);
     };
 }

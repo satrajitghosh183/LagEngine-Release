@@ -1,10 +1,10 @@
 #pragma once
 
-#include <GameEngine/Core/Application.hpp>
-#include <GameEngine/Scene/Scene.hpp>
-#include <GameEngine/Graphics/MeshGenerator3D.hpp>
-#include <GameEngine/Graphics/Shader.hpp>
-#include <GameEngine/Graphics/Material.hpp>
+#include "../../Engine/Core/Application.hpp"
+#include "../../Engine/Scene/Scene.hpp"
+#include "../../Engine/Graphics/MeshGenerator3D.hpp"
+#include "../../Engine/Graphics/Shader.hpp"
+#include "../../Engine/Graphics/Material.hpp"
 #include <memory>
 
 using namespace GameEngine;

@@ -1,14 +1,18 @@
 #include "PhysicsDemoApp.hpp"
-#include <GameEngine/Scene/Components/TransformComponent.hpp>
-#include <GameEngine/Scene/Components/MeshRendererComponent.hpp>
-#include <GameEngine/Scene/Components/RigidBodyComponent.hpp>
-#include <GameEngine/Scene/Components/ColliderComponent.hpp>
-#include <GameEngine/Scene/Components/CameraComponent.hpp>
-#include <GameEngine/Graphics/Material.hpp>
-#include <GameEngine/Graphics/Shader.hpp>
-#include <GameEngine/UI/UIRenderer.hpp>
-#include <GameEngine/Platform/Input.hpp>
-#include <GameEngine/Core/Time.hpp>
+#include "../../Engine/Core/EntryPoint.hpp"
+#include "../../Engine/Scene/Components/TransformComponent.hpp"
+#include "../../Engine/Scene/Components/MeshRendererComponent.hpp"
+#include "../../Engine/Scene/Components/RigidBodyComponent.hpp"
+#include "../../Engine/Scene/Components/ColliderComponent.hpp"
+#include "../../Engine/Scene/Components/CameraComponent.hpp"
+#include "../../Engine/Graphics/Material.hpp"
+#include "../../Engine/Graphics/Shader.hpp"
+#include "../../Engine/Platform/Input.hpp"
+#include "../../Engine/Core/Time.hpp"
+#include "../../Engine/Physics/Shapes/BoxShape.hpp"
+#include "../../Engine/Physics/Shapes/SphereShape.hpp"
+#include "../../Engine/Physics/Shapes/PlaneShape.hpp"
+#include <imgui.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/string_cast.hpp>
 
@@ -16,12 +20,10 @@ PhysicsDemoApp::PhysicsDemoApp() : Application("Physics Demo") {
 }
 
 void PhysicsDemoApp::OnInit() {
-    // Initialize UI
-    UIRenderer::Init();
     
     // Create scene
     m_Scene = CreateRef<Scene>("PhysicsDemoScene");
-    GetSceneManager()->SetActiveScene(m_Scene);
+    GetSceneManager().SetActiveScene(m_Scene);
     
     // Create basic shader
     const char* vertexSrc = R"(
@@ -85,34 +87,11 @@ void PhysicsDemoApp::OnUpdate(float deltaTime) {
 }
 
 void PhysicsDemoApp::OnRender() {
-    // UI
-    UIRenderer::BeginFrame();
-    
-    ImGui::Begin("Physics Demo");
-    ImGui::Text("FPS: %.1f", Time::GetFPS());
-    ImGui::Text("Entities: %zu", m_Scene->GetEntityCount());
-    ImGui::Separator();
-    ImGui::Text("Controls:");
-    ImGui::BulletText("WASD - Move camera");
-    ImGui::BulletText("Mouse - Rotate camera");
-    ImGui::BulletText("Space - Spawn objects");
-    ImGui::BulletText("R - Reset scene");
-    ImGui::Separator();
-    ImGui::SliderFloat("Camera Distance", &m_CameraDistance, 5.0f, 50.0f);
-    ImGui::SliderFloat("Camera Pitch", &m_CameraPitch, -89.0f, 89.0f);
-    ImGui::SliderFloat("Camera Yaw", &m_CameraYaw, -180.0f, 180.0f);
-    
-    if (ImGui::Button("Reset Scene")) {
-        SetupScene();
-    }
-    
-    ImGui::End();
-    
-    UIRenderer::EndFrame();
+    // Simple render pass - UI disabled for now
+    // Scene rendering is handled by the Application base class
 }
 
 void PhysicsDemoApp::OnShutdown() {
-    UIRenderer::Shutdown();
 }
 
 void PhysicsDemoApp::SetupScene() {
@@ -152,9 +131,10 @@ void PhysicsDemoApp::CreateGround() {
     rb.Type = RigidBodyComponent::BodyType::Static;
     rb.UseGravity = false;
     
+    // Use PlaneShape for ground
     auto& collider = ground.AddComponent<ColliderComponent>();
-    collider.Shape = ColliderComponent::ColliderShape::Box;
-    collider.Size = glm::vec3(20, 0.1f, 20);
+    auto planeShape = CreateRef<Physics::PlaneShape>(glm::vec3(0, 1, 0), 0.0f);
+    collider.SetShape(planeShape);
 }
 
 void PhysicsDemoApp::CreateFallingObjects() {
@@ -186,7 +166,8 @@ void PhysicsDemoApp::CreateFallingObjects() {
         
         // Random shape
         Ref<Mesh3D> mesh;
-        if (rand() % 2 == 0) {
+        bool useCube = (rand() % 2 == 0);
+        if (useCube) {
             mesh = m_CubeMesh;
         } else {
             mesh = m_SphereMesh;
@@ -200,12 +181,12 @@ void PhysicsDemoApp::CreateFallingObjects() {
         rb.UseGravity = true;
         
         auto& collider = obj.AddComponent<ColliderComponent>();
-        if (mesh == m_CubeMesh) {
-            collider.Shape = ColliderComponent::ColliderShape::Box;
-            collider.Size = glm::vec3(1.0f);
+        if (useCube) {
+            auto boxShape = CreateRef<Physics::BoxShape>(glm::vec3(0.5f, 0.5f, 0.5f));
+            collider.SetShape(boxShape);
         } else {
-            collider.Shape = ColliderComponent::ColliderShape::Sphere;
-            collider.Radius = 0.5f;
+            auto sphereShape = CreateRef<Physics::SphereShape>(0.5f);
+            collider.SetShape(sphereShape);
         }
     }
 }
@@ -259,4 +240,3 @@ void PhysicsDemoApp::UpdateCamera(float deltaTime) {
 GameEngine::Application* GameEngine::CreateApplication() {
     return new PhysicsDemoApp();
 }
-

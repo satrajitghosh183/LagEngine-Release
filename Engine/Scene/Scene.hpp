@@ -232,3 +232,42 @@ namespace GameEngine {
         return result;
     }
 }
+
+// Entity template implementations - must be after Scene definition
+namespace GameEngine {
+
+    template<typename T, typename... Args>
+    T& Entity::AddComponent(Args&&... args) {
+        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        return m_Scene->AddComponent<T>(m_UUID, std::forward<Args>(args)...);
+    }
+
+    template<typename T>
+    T& Entity::GetComponent() {
+        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        T* comp = m_Scene->GetComponent<T>(m_UUID);
+        GE_CORE_ASSERT(comp, "Entity does not have component!");
+        return *comp;
+    }
+
+    template<typename T>
+    const T& Entity::GetComponent() const {
+        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        T* comp = const_cast<Scene*>(m_Scene)->GetComponent<T>(m_UUID);
+        GE_CORE_ASSERT(comp, "Entity does not have component!");
+        return *comp;
+    }
+
+    template<typename T>
+    bool Entity::HasComponent() const {
+        if (!IsValid()) return false;
+        return const_cast<Scene*>(m_Scene)->HasComponent<T>(m_UUID);
+    }
+
+    template<typename T>
+    void Entity::RemoveComponent() {
+        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        m_Scene->RemoveComponent<T>(m_UUID);
+    }
+
+}

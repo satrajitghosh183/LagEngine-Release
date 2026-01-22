@@ -1,11 +1,63 @@
 #include "CharacterControllerApp.hpp"
-#include <GameEngine/Graphics/MeshGenerator3D.hpp>
-#include <GameEngine/Utilities/Debug/DebugDraw.hpp>
-#include <GameEngine/Platform/Input.hpp>
-#include <GameEngine/Core/MathUtils.hpp>
+#include "../../Engine/Core/EntryPoint.hpp"
+#include "../../Engine/Graphics/MeshGenerator3D.hpp"
+#include "../../Engine/Utilities/Debug/DebugDraw.hpp"
+#include "../../Engine/Platform/Input.hpp"
+#include "../../Engine/Core/Time.hpp"
+#include "../../Engine/Core/RandomUtils.hpp"
+#include "../../Engine/Scene/Components/TransformComponent.hpp"
+#include "../../Engine/Scene/Components/MeshRendererComponent.hpp"
+#include "../../Engine/Scene/Components/CameraComponent.hpp"
+#include "../../Engine/Graphics/Material.hpp"
+#include "../../Engine/Graphics/Shader.hpp"
+#include "../../Engine/Graphics/RenderCommand.hpp"
+#include <imgui.h>
+#include <glm/glm.hpp>
+#include <cmath>
 
 CharacterControllerApp::CharacterControllerApp()
     : Application("Character Controller Demo") {
+}
+
+// Simple shader for rendering
+static Ref<Shader> CreateBasicShader() {
+    const char* vertexSrc = R"(
+        #version 450 core
+        layout(location = 0) in vec3 a_Position;
+        layout(location = 1) in vec3 a_Normal;
+        
+        uniform mat4 u_ViewProjection;
+        uniform mat4 u_Transform;
+        
+        out vec3 v_Normal;
+        out vec3 v_Position;
+        
+        void main() {
+            v_Position = vec3(u_Transform * vec4(a_Position, 1.0));
+            v_Normal = mat3(transpose(inverse(u_Transform))) * a_Normal;
+            gl_Position = u_ViewProjection * vec4(v_Position, 1.0);
+        }
+    )";
+    
+    const char* fragmentSrc = R"(
+        #version 450 core
+        layout(location = 0) out vec4 FragColor;
+        
+        in vec3 v_Normal;
+        in vec3 v_Position;
+        
+        uniform vec3 u_Color;
+        uniform vec3 u_LightDir;
+        
+        void main() {
+            vec3 normal = normalize(v_Normal);
+            float diff = max(dot(normal, -u_LightDir), 0.3);
+            vec3 color = u_Color * diff;
+            FragColor = vec4(color, 1.0);
+        }
+    )";
+    
+    return CreateRef<Shader>("Basic", vertexSrc, fragmentSrc);
 }
 
 void CharacterControllerApp::OnInit() {
@@ -29,6 +81,9 @@ void CharacterControllerApp::OnInit() {
 
 void CharacterControllerApp::CreateScene() {
     m_Scene = CreateRef<Scene>("CharacterScene");
+    GetSceneManager().SetActiveScene(m_Scene);
+    
+    auto basicShader = CreateBasicShader();
     
     // Create character controller
     m_CharacterController = CreateRef<Physics::CharacterController>(0.3f, 1.8f);
@@ -36,30 +91,36 @@ void CharacterControllerApp::CreateScene() {
     
     // Create player entity (visual representation)
     m_PlayerEntity = m_Scene->CreateEntity("Player");
-    auto& playerMesh = m_PlayerEntity.AddComponent<MeshRendererComponent>();
-    playerMesh.Mesh = MeshGenerator3D::CreateCapsule(0.3f, 1.8f);
-    playerMesh.Material = CreateRef<Material>();
-    playerMesh.Material->Albedo = glm::vec3(0.2f, 0.6f, 0.8f);
+    auto& playerTransform = m_PlayerEntity.AddComponent<TransformComponent>();
+    playerTransform.Position = glm::vec3(0, 2, 0);
+    
+    auto playerMesh = MeshGenerator3D::CreateCapsule(0.3f, 1.8f, 16, 8);
+    auto playerMaterial = CreateRef<Material>(basicShader);
+    playerMaterial->SetVec3("u_Color", glm::vec3(0.2f, 0.6f, 0.8f));
+    playerMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+    m_PlayerEntity.AddComponent<MeshRendererComponent>(playerMesh, playerMaterial);
     
     // Create camera
     m_CameraEntity = m_Scene->CreateEntity("Camera");
     m_CameraEntity.AddComponent<CameraComponent>();
+    m_Scene->SetMainCamera(m_CameraEntity);
     
     // Create ground
     m_Ground = m_Scene->CreateEntity("Ground");
-    auto& groundTransform = m_Ground.GetComponent<TransformComponent>();
+    auto& groundTransform = m_Ground.AddComponent<TransformComponent>();
     groundTransform.Scale = glm::vec3(50, 0.5f, 50);
     
-    auto& groundMesh = m_Ground.AddComponent<MeshRendererComponent>();
-    groundMesh.Mesh = MeshGenerator3D::CreateCube();
-    groundMesh.Material = CreateRef<Material>();
-    groundMesh.Material->Albedo = glm::vec3(0.3f, 0.3f, 0.3f);
+    auto groundMesh = MeshGenerator3D::CreateCube(1.0f);
+    auto groundMaterial = CreateRef<Material>(basicShader);
+    groundMaterial->SetVec3("u_Color", glm::vec3(0.3f, 0.3f, 0.3f));
+    groundMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+    m_Ground.AddComponent<MeshRendererComponent>(groundMesh, groundMaterial);
     
     // Create obstacles
     for (int i = 0; i < 10; i++) {
         Entity obstacle = m_Scene->CreateEntity("Obstacle_" + std::to_string(i));
         
-        auto& transform = obstacle.GetComponent<TransformComponent>();
+        auto& transform = obstacle.AddComponent<TransformComponent>();
         transform.Position = glm::vec3(
             Random::Range(-20.0f, 20.0f),
             1.0f,
@@ -71,10 +132,11 @@ void CharacterControllerApp::CreateScene() {
             Random::Range(1.0f, 3.0f)
         );
         
-        auto& mesh = obstacle.AddComponent<MeshRendererComponent>();
-        mesh.Mesh = MeshGenerator3D::CreateCube();
-        mesh.Material = CreateRef<Material>();
-        mesh.Material->Albedo = Random::Color();
+        auto obstacleMesh = MeshGenerator3D::CreateCube(1.0f);
+        auto obstacleMaterial = CreateRef<Material>(basicShader);
+        obstacleMaterial->SetVec3("u_Color", Random::Global.Color());
+        obstacleMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+        obstacle.AddComponent<MeshRendererComponent>(obstacleMesh, obstacleMaterial);
         
         m_Obstacles.push_back(obstacle);
     }
@@ -83,14 +145,15 @@ void CharacterControllerApp::CreateScene() {
     for (int i = 0; i < 10; i++) {
         Entity step = m_Scene->CreateEntity("Step_" + std::to_string(i));
         
-        auto& transform = step.GetComponent<TransformComponent>();
+        auto& transform = step.AddComponent<TransformComponent>();
         transform.Position = glm::vec3(-10.0f + i * 0.5f, 0.3f * i, -10.0f);
         transform.Scale = glm::vec3(2.0f, 0.3f, 5.0f);
         
-        auto& mesh = step.AddComponent<MeshRendererComponent>();
-        mesh.Mesh = MeshGenerator3D::CreateCube();
-        mesh.Material = CreateRef<Material>();
-        mesh.Material->Albedo = glm::vec3(0.6f, 0.4f, 0.2f);
+        auto stepMesh = MeshGenerator3D::CreateCube(1.0f);
+        auto stepMaterial = CreateRef<Material>(basicShader);
+        stepMaterial->SetVec3("u_Color", glm::vec3(0.6f, 0.4f, 0.2f));
+        stepMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+        step.AddComponent<MeshRendererComponent>(stepMesh, stepMaterial);
         
         m_Obstacles.push_back(step);
     }
@@ -107,19 +170,25 @@ void CharacterControllerApp::OnUpdate(float deltaTime) {
     auto& playerTransform = m_PlayerEntity.GetComponent<TransformComponent>();
     playerTransform.Position = m_CharacterController->GetPosition();
     
-    m_Scene->OnUpdate(deltaTime);
+    m_Scene->Update(deltaTime);
 }
 
 void CharacterControllerApp::HandleMovement(float deltaTime) {
     // Get input
-    float horizontal = Input::GetAxis("Horizontal"); // A/D keys
-    float vertical = Input::GetAxis("Vertical");     // W/S keys
+    float horizontal = 0.0f;
+    float vertical = 0.0f;
+    
+    if (Input::IsKeyPressed(KeyCode::A)) horizontal -= 1.0f;
+    if (Input::IsKeyPressed(KeyCode::D)) horizontal += 1.0f;
+    if (Input::IsKeyPressed(KeyCode::W)) vertical += 1.0f;
+    if (Input::IsKeyPressed(KeyCode::S)) vertical -= 1.0f;
     
     // Calculate movement direction relative to camera
+    float yawRad = glm::radians(m_CameraYaw);
     glm::vec3 forward = glm::vec3(
-        sin(Math::ToRadians(m_CameraYaw)),
+        sin(yawRad),
         0,
-        cos(Math::ToRadians(m_CameraYaw))
+        cos(yawRad)
     );
     glm::vec3 right = glm::cross(forward, glm::vec3(0, 1, 0));
     
@@ -158,29 +227,32 @@ void CharacterControllerApp::HandleCamera() {
     m_CameraPitch = glm::clamp(m_CameraPitch, -89.0f, 89.0f);
     
     // Update camera position
-    auto& cam = m_CameraEntity.GetComponent<CameraComponent>().GetCamera();
+    auto& camTransform = m_CameraEntity.GetComponent<TransformComponent>();
     glm::vec3 playerPos = m_CharacterController->GetPosition();
     
     if (m_IsFirstPerson) {
         // First person - camera at eye level
         glm::vec3 eyePos = playerPos + glm::vec3(0, 0.7f, 0);
-        cam.SetPosition(eyePos);
+        camTransform.Position = eyePos;
         
+        float pitchRad = glm::radians(m_CameraPitch);
+        float yawRad = glm::radians(m_CameraYaw);
         glm::vec3 forward = glm::vec3(
-            cos(Math::ToRadians(m_CameraPitch)) * sin(Math::ToRadians(m_CameraYaw)),
-            sin(Math::ToRadians(m_CameraPitch)),
-            cos(Math::ToRadians(m_CameraPitch)) * cos(Math::ToRadians(m_CameraYaw))
+            cos(pitchRad) * sin(yawRad),
+            sin(pitchRad),
+            cos(pitchRad) * cos(yawRad)
         );
-        cam.LookAt(eyePos + forward);
+        camTransform.LookAt(eyePos + forward);
     } else {
         // Third person - camera behind player
+        float yawRad = glm::radians(m_CameraYaw);
         glm::vec3 offset = glm::vec3(
-            m_ThirdPersonDistance * sin(Math::ToRadians(m_CameraYaw)),
+            m_ThirdPersonDistance * sin(yawRad),
             m_ThirdPersonDistance * 0.3f,
-            m_ThirdPersonDistance * cos(Math::ToRadians(m_CameraYaw))
+            m_ThirdPersonDistance * cos(yawRad)
         );
-        cam.SetPosition(playerPos - offset + glm::vec3(0, 2, 0));
-        cam.LookAt(playerPos + glm::vec3(0, 1, 0));
+        camTransform.Position = playerPos - offset + glm::vec3(0, 2, 0);
+        camTransform.LookAt(playerPos + glm::vec3(0, 1, 0));
     }
 }
 
@@ -188,16 +260,14 @@ void CharacterControllerApp::OnRender() {
     RenderCommand::SetClearColor({0.53f, 0.81f, 0.92f, 1.0f}); // Sky blue
     RenderCommand::Clear();
     
-    auto& cam = m_CameraEntity.GetComponent<CameraComponent>().GetCamera();
-    
     // Don't render player in first person
     if (m_IsFirstPerson) {
-        m_PlayerEntity.GetComponent<MeshRendererComponent>().Enabled = false;
+        auto& playerRenderer = m_PlayerEntity.GetComponent<MeshRendererComponent>();
+        playerRenderer.Enabled = false;
     } else {
-        m_PlayerEntity.GetComponent<MeshRendererComponent>().Enabled = true;
+        auto& playerRenderer = m_PlayerEntity.GetComponent<MeshRendererComponent>();
+        playerRenderer.Enabled = true;
     }
-    
-    m_Scene->OnRender(cam);
     
     // Debug draw
     DebugDraw::DrawGrid(50.0f, 50);
@@ -205,17 +275,18 @@ void CharacterControllerApp::OnRender() {
     // Draw character controller capsule
     if (!m_IsFirstPerson) {
         auto capsule = m_CharacterController->GetCapsuleShape();
-        DebugDraw::DrawCapsule(
-            m_CharacterController->GetPosition(),
-            capsule->GetRadius(),
-            capsule->GetHeight(),
-            glm::quat(1, 0, 0, 0),
-            glm::vec3(1, 1, 0)
-        );
+        if (capsule) {
+            DebugDraw::DrawCapsule(
+                m_CharacterController->GetPosition(),
+                capsule->GetRadius(),
+                capsule->GetHeight(),
+                glm::quat(1, 0, 0, 0),
+                glm::vec3(1, 1, 0)
+            );
+        }
     }
     
     DebugDraw::Update(Time::GetDeltaTime());
-    DebugDraw::Render(cam);
     
     RenderUI();
 }
@@ -259,9 +330,5 @@ void CharacterControllerApp::OnShutdown() {
 }
 
 GameEngine::Application* GameEngine::CreateApplication() {
-    // Map input axes
-    Input::MapAxis("Horizontal", KeyCode::D, KeyCode::A);
-    Input::MapAxis("Vertical", KeyCode::W, KeyCode::S);
-    
     return new CharacterControllerApp();
 }

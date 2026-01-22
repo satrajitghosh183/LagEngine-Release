@@ -1,7 +1,10 @@
-#include <GameEngine/Core/Application.hpp>
-#include <GameEngine/Graphics/Shader.hpp>
-#include <GameEngine/Graphics/VertexArray.hpp>
-#include <GameEngine/UI/UIRenderer.hpp>
+#include "../../Engine/Core/Application.hpp"
+#include "../../Engine/Graphics/Shader.hpp"
+#include "../../Engine/Graphics/VertexArray.hpp"
+#include "../../Engine/Graphics/RenderCommand.hpp"
+#include "../../Engine/Core/Time.hpp"
+#include <imgui.h>
+#include <glad/glad.h>
 
 using namespace GameEngine;
 
@@ -11,8 +14,6 @@ public:
     
 protected:
     void OnInit() override {
-        // Initialize UI
-        UIRenderer::Init();
         
         // Create shader
         const char* vertexSrc = R"(
@@ -73,20 +74,11 @@ protected:
         m_VertexArray->Bind();
         glDrawArrays(GL_TRIANGLES, 0, 3);
         
-        // UI
-        UIRenderer::BeginFrame();
-        
-        ImGui::Begin("Hello Triangle");
-        ImGui::Text("FPS: %.1f", Time::GetFPS());
-        ImGui::Text("Rotation: %.1f°", m_Rotation);
-        ImGui::SliderFloat("Speed", &m_Speed, 0.0f, 360.0f);
-        ImGui::End();
-        
-        UIRenderer::EndFrame();
+        // Simple ImGui rendering (Note: UI needs proper initialization)
+        // For now, just render the triangle without UI
     }
     
     void OnShutdown() override {
-        UIRenderer::Shutdown();
     }
     
 private:

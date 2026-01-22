@@ -36,6 +36,16 @@ if(BUILD_EXAMPLES)
     endif()
 endif()
 
+# Build Editor
+option(BUILD_EDITOR "Build the GameEngine Editor" ON)
+if(BUILD_EDITOR)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/Editor/CMakeLists.txt")
+        add_subdirectory(Editor)
+    else()
+        message(WARNING "Editor not configured yet")
+    endif()
+endif()
+
 if(BUILD_TESTS)
     if(EXISTS "${CMAKE_SOURCE_DIR}/Tests/CMakeLists.txt")
         enable_testing()

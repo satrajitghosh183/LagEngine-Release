@@ -1,0 +1,126 @@
+# ===================
+# Build directories
+# ===================
+build/
+cmake-build-*/
+out/
+bin/
+lib/
+
+# ===================
+# CMake generated files
+# ===================
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!cmake/*.cmake
+!cmake/*.cmake.in
+!**/CMakeLists.txt
+compile_commands.json
+
+# ===================
+# IDE files
+# ===================
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj*
+*.user
+*.suo
+*.cache
+*.ncb
+*.opendb
+*.VC.db
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# CLion / JetBrains
+.idea/
+*.iml
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Qt Creator
+*.pro.user*
+*.qbs.user*
+*.qmlproject.user*
+*.moc
+
+# ===================
+# Compiled files
+# ===================
+*.o
+*.obj
+*.lo
+*.slo
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.dSYM/
+
+# ===================
+# OS specific
+# ===================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+.nfs*
+
+# ===================
+# Editor backup files
+# ===================
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+
+# ===================
+# Logs and databases
+# ===================
+*.log
+*.sqlite
+
+# ===================
+# Temporary files
+# ===================
+tmp/
+temp/
+*.tmp
+*.bak
+
+# ===================
+# Package managers
+# ===================
+vcpkg_installed/
+conan/

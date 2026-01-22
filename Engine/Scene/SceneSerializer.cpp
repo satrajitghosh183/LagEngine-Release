@@ -46,8 +46,11 @@ namespace GameEngine {
     std::string SceneSerializer::SerializeToString() {
         nlohmann::json sceneJson;
         
-        // Scene metadata
-        sceneJson["version"] = SCENE_VERSION;
+        // Scene metadata with version
+        sceneJson["version"] = SCENE_VERSION_STRING;
+        sceneJson["versionMajor"] = SCENE_VERSION_MAJOR;
+        sceneJson["versionMinor"] = SCENE_VERSION_MINOR;
+        sceneJson["versionPatch"] = SCENE_VERSION_PATCH;
         sceneJson["name"] = m_Scene->GetName();
         sceneJson["uuid"] = m_Scene->GetUUID().ToString();
         
@@ -84,10 +87,7 @@ namespace GameEngine {
                 return false;
             }
             
-            std::string version = sceneJson["version"];
-            if (version != SCENE_VERSION) {
-                GE_CORE_WARN("Scene version mismatch: {0} (expected {1})", version, SCENE_VERSION);
-            }
+            // Version checking moved to migration system
             
             // Scene metadata
             if (sceneJson.contains("name")) {
@@ -116,6 +116,50 @@ namespace GameEngine {
             GE_CORE_ERROR("Failed to parse scene JSON: {0}", e.what());
             return false;
         }
+    }
+
+    bool SceneSerializer::MigrateScene(nlohmann::json& data, int fromVersion, int toVersion) {
+        int currentVersion = fromVersion;
+        
+        while (currentVersion < toVersion) {
+            int nextVersion = currentVersion + 1;
+            
+            if (currentVersion == 10000 && nextVersion == 20000) {
+                // Migrate from 1.0.0 to 2.0.0
+                if (!MigrateV1ToV2(data)) {
+                    return false;
+                }
+                currentVersion = nextVersion;
+            } else {
+                GE_CORE_ERROR("No migration path from version {0} to {1}", currentVersion, nextVersion);
+                return false;
+            }
+        }
+        
+        // Update version fields
+        data["version"] = SCENE_VERSION_STRING;
+        data["versionMajor"] = SCENE_VERSION_MAJOR;
+        data["versionMinor"] = SCENE_VERSION_MINOR;
+        data["versionPatch"] = SCENE_VERSION_PATCH;
+        
+        return true;
+    }
+
+    bool SceneSerializer::MigrateV1ToV2(nlohmann::json& data) {
+        // Example migration: add new fields, restructure data, etc.
+        // For now, this is a placeholder
+        GE_CORE_INFO("Migrating scene from version 1.0.0 to 2.0.0");
+        
+        // Add any new required fields or restructure as needed
+        if (data.contains("scene")) {
+            auto& sceneData = data["scene"];
+            // Example: add default values for new fields
+            if (!sceneData.contains("ambientLight")) {
+                sceneData["ambientLight"] = {0.2f, 0.2f, 0.2f};
+            }
+        }
+        
+        return true;
     }
 
     nlohmann::json SceneSerializer::SerializeEntity(Entity entity) {
@@ -226,4 +270,5 @@ namespace GameEngine {
             GE_CORE_WARN("Unknown component type: {0}", type);
         }
     }
+
 }

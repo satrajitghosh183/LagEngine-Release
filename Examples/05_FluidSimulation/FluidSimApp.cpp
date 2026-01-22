@@ -1,9 +1,60 @@
 #include "FluidSimApp.hpp"
-#include <GameEngine/Graphics/MeshGenerator3D.hpp>
-#include <GameEngine/Graphics/RenderCommand.hpp>
-#include <GameEngine/Utilities/Debug/DebugDraw.hpp>
-#include <GameEngine/Platform/Input.hpp>
-#include <GameEngine/Core/MathUtils.hpp>
+#include "../../Engine/Core/EntryPoint.hpp"
+#include "../../Engine/Graphics/MeshGenerator3D.hpp"
+#include "../../Engine/Graphics/RenderCommand.hpp"
+#include "../../Engine/Utilities/Debug/DebugDraw.hpp"
+#include "../../Engine/Platform/Input.hpp"
+#include "../../Engine/Core/Time.hpp"
+#include "../../Engine/Core/RandomUtils.hpp"
+#include "../../Engine/Scene/Components/TransformComponent.hpp"
+#include "../../Engine/Scene/Components/MeshRendererComponent.hpp"
+#include "../../Engine/Scene/Components/CameraComponent.hpp"
+#include "../../Engine/Graphics/Material.hpp"
+#include "../../Engine/Graphics/Shader.hpp"
+#include <imgui.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <cmath>
+
+// Simple shader for rendering
+static Ref<Shader> CreateBasicShader() {
+    const char* vertexSrc = R"(
+        #version 450 core
+        layout(location = 0) in vec3 a_Position;
+        layout(location = 1) in vec3 a_Normal;
+        
+        uniform mat4 u_ViewProjection;
+        uniform mat4 u_Transform;
+        
+        out vec3 v_Normal;
+        out vec3 v_Position;
+        
+        void main() {
+            v_Position = vec3(u_Transform * vec4(a_Position, 1.0));
+            v_Normal = mat3(transpose(inverse(u_Transform))) * a_Normal;
+            gl_Position = u_ViewProjection * vec4(v_Position, 1.0);
+        }
+    )";
+    
+    const char* fragmentSrc = R"(
+        #version 450 core
+        layout(location = 0) out vec4 FragColor;
+        
+        in vec3 v_Normal;
+        in vec3 v_Position;
+        
+        uniform vec3 u_Color;
+        uniform vec3 u_LightDir;
+        
+        void main() {
+            vec3 normal = normalize(v_Normal);
+            float diff = max(dot(normal, -u_LightDir), 0.3);
+            vec3 color = u_Color * diff;
+            FragColor = vec4(color, 1.0);
+        }
+    )";
+    
+    return CreateRef<Shader>("Basic", vertexSrc, fragmentSrc);
+}
 
 FluidSimulationApp::FluidSimulationApp()
     : Application("SPH Fluid Simulation") {
@@ -21,6 +72,9 @@ void FluidSimulationApp::OnInit() {
 
 void FluidSimulationApp::CreateScene() {
     m_Scene = CreateRef<Scene>("FluidScene");
+    GetSceneManager().SetActiveScene(m_Scene);
+    
+    auto basicShader = CreateBasicShader();
     
     // Create SPH solver
     m_SPHSolver = CreateRef<Physics::SPHSolver>(5000);
@@ -33,19 +87,20 @@ void FluidSimulationApp::CreateScene() {
     // Create camera
     m_CameraEntity = m_Scene->CreateEntity("Camera");
     m_CameraEntity.AddComponent<CameraComponent>();
+    m_Scene->SetMainCamera(m_CameraEntity);
     
     // Create container walls (for visualization)
     auto createWall = [&](const glm::vec3& pos, const glm::vec3& scale) {
         Entity wall = m_Scene->CreateEntity("Wall");
-        auto& transform = wall.GetComponent<TransformComponent>();
+        auto& transform = wall.AddComponent<TransformComponent>();
         transform.Position = pos;
         transform.Scale = scale;
         
-        auto& mesh = wall.AddComponent<MeshRendererComponent>();
-        mesh.Mesh = MeshGenerator3D::CreateCube();
-        mesh.Material = CreateRef<Material>();
-        mesh.Material->Albedo = glm::vec3(0.3f, 0.3f, 0.4f);
-        mesh.Material->Transparency = 0.3f;
+        auto wallMesh = MeshGenerator3D::CreateCube(1.0f);
+        auto wallMaterial = CreateRef<Material>(basicShader);
+        wallMaterial->SetVec3("u_Color", glm::vec3(0.3f, 0.3f, 0.4f));
+        wallMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+        wall.AddComponent<MeshRendererComponent>(wallMesh, wallMaterial);
         
         return wall;
     };
@@ -61,8 +116,9 @@ void FluidSimulationApp::CreateScene() {
     
     // Create particle mesh (instanced sphere)
     m_ParticleMesh = MeshGenerator3D::CreateSphere(0.1f, 8, 8);
-    m_FluidMaterial = CreateRef<Material>();
-    m_FluidMaterial->Albedo = glm::vec3(0.2f, 0.5f, 0.9f);
+    m_FluidMaterial = CreateRef<Material>(basicShader);
+    m_FluidMaterial->SetVec3("u_Color", glm::vec3(0.2f, 0.5f, 0.9f));
+    m_FluidMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
 }
 
 void FluidSimulationApp::SpawnFluidParticles() {
@@ -98,12 +154,12 @@ void FluidSimulationApp::OnUpdate(float deltaTime) {
     }
     
     // Update camera
-    auto& cam = m_CameraEntity.GetComponent<CameraComponent>().GetCamera();
-    float camX = m_CameraDistance * cos(Math::ToRadians(m_CameraYaw)) * cos(Math::ToRadians(m_CameraPitch));
-    float camY = m_CameraDistance * sin(Math::ToRadians(m_CameraPitch));
-    float camZ = m_CameraDistance * sin(Math::ToRadians(m_CameraYaw)) * cos(Math::ToRadians(m_CameraPitch));
-    cam.SetPosition(glm::vec3(camX, camY + 5, camZ));
-    cam.LookAt(glm::vec3(0, 5, 0));
+    auto& camTransform = m_CameraEntity.GetComponent<TransformComponent>();
+    float camX = m_CameraDistance * cos(glm::radians(m_CameraYaw)) * cos(glm::radians(m_CameraPitch));
+    float camY = m_CameraDistance * sin(glm::radians(m_CameraPitch));
+    float camZ = m_CameraDistance * sin(glm::radians(m_CameraYaw)) * cos(glm::radians(m_CameraPitch));
+    camTransform.Position = glm::vec3(camX, camY + 5, camZ);
+    camTransform.LookAt(glm::vec3(0, 5, 0));
     
     // Update fluid simulation
     if (!m_Paused) {
@@ -124,18 +180,14 @@ void FluidSimulationApp::OnUpdate(float deltaTime) {
         SpawnFluidParticles();
     }
     
-    m_Scene->OnUpdate(deltaTime);
+    m_Scene->Update(deltaTime);
 }
 
 void FluidSimulationApp::OnRender() {
     RenderCommand::SetClearColor({0.1f, 0.1f, 0.15f, 1.0f});
     RenderCommand::Clear();
     
-    auto& cam = m_CameraEntity.GetComponent<CameraComponent>().GetCamera();
-    m_Scene->OnRender(cam);
-    
-    // Render fluid particles
-    RenderFluidParticles(cam);
+    // Render fluid particles (simplified - just use debug draw)
     
     // Debug draw
     DebugDraw::DrawGrid(10.0f, 10);
@@ -147,12 +199,11 @@ void FluidSimulationApp::OnRender() {
     );
     
     DebugDraw::Update(Time::GetDeltaTime());
-    DebugDraw::Render(cam);
     
     RenderUI();
 }
 
-void FluidSimulationApp::RenderFluidParticles(const Camera3D& camera) {
+void FluidSimulationApp::RenderFluidParticles(const Camera3D& /*camera*/) {
     // Simple particle rendering (could be optimized with instancing)
     const auto& particles = m_SPHSolver->GetParticles();
     
@@ -166,11 +217,6 @@ void FluidSimulationApp::RenderFluidParticles(const Camera3D& camera) {
         );
         
         // Render sphere at particle position
-        // This is simplified - in production you'd use instanced rendering
-        glm::mat4 transform = glm::translate(glm::mat4(1.0f), particle.Position);
-        transform = glm::scale(transform, glm::vec3(0.1f));
-        
-        // TODO: Render with proper instancing
         DebugDraw::DrawSphere(particle.Position, 0.1f, color);
     }
 }

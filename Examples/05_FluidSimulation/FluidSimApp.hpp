@@ -1,9 +1,9 @@
 #pragma once
 
-#include <GameEngine/Core/Application.hpp>
-#include <GameEngine/Scene/Scene.hpp>
-#include <GameEngine/Physics/Fluids/SPHSolver.hpp>
-#include <GameEngine/UI/UIRenderer.hpp>
+#include "../../Engine/Core/Application.hpp"
+#include "../../Engine/Scene/Scene.hpp"
+#include "../../Engine/Physics/Fluids/SPHSolver.hpp"
+#include "../../Engine/UI/UIRenderer.hpp"
 
 using namespace GameEngine;
 

@@ -3,12 +3,16 @@
 #include "Base.hpp"
 #include "Time.hpp"
 #include "Logger.hpp"
+#include "RuntimeConfig.hpp"
 #include "../Platform/Window.hpp"
 #include "../Graphics/Renderer3D.hpp"
 #include "../Scene/SceneManager.hpp"
 #include <memory>
 
 namespace GameEngine {
+
+    // Forward declaration
+    class FrameScheduler;
 
     /**
      * @brief Core application lifecycle manager
@@ -31,7 +35,8 @@ namespace GameEngine {
      */
     class Application {
     public:
-        Application(const std::string& name = "GameEngine App");
+        Application(const RuntimeConfig& config = RuntimeConfig());
+        Application(const std::string& name); // Deprecated: use RuntimeConfig constructor
         virtual ~Application();
         
         /**
@@ -92,8 +97,10 @@ namespace GameEngine {
     private:
         static Application* s_Instance;
         
+        RuntimeConfig m_Config;
         Scope<Window> m_Window;
         Scope<SceneManager> m_SceneManager;
+        Scope<FrameScheduler> m_FrameScheduler;
         
         bool m_Running;
         bool m_Minimized;

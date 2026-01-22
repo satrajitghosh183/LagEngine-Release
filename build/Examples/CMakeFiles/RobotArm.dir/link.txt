@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/RobotArm.dir/06_RobotArm/RobotArmApp.cpp.o -o ../bin/RobotArm  ../lib/libGameEngine.a ../lib/libglad.a ../lib/libimgui.a ../lib/libglfw3.a /usr/lib/x86_64-linux-gnu/librt.a -lm /usr/lib/x86_64-linux-gnu/libX11.so -lGL -lX11 -lpthread -ldl 

@@ -1,13 +1,15 @@
 #include "ClothSimulationApp.hpp"
-#include <GameEngine/Scene/Components/TransformComponent.hpp>
-#include <GameEngine/Scene/Components/MeshRendererComponent.hpp>
-#include <GameEngine/Scene/Components/CameraComponent.hpp>
-#include <GameEngine/Graphics/Material.hpp>
-#include <GameEngine/Graphics/Shader.hpp>
-#include <GameEngine/Graphics/MeshGenerator3D.hpp>
-#include <GameEngine/UI/UIRenderer.hpp>
-#include <GameEngine/Platform/Input.hpp>
-#include <GameEngine/Core/Time.hpp>
+#include "../../Engine/Core/EntryPoint.hpp"
+#include "../../Engine/Scene/Components/TransformComponent.hpp"
+#include "../../Engine/Scene/Components/MeshRendererComponent.hpp"
+#include "../../Engine/Scene/Components/CameraComponent.hpp"
+#include "../../Engine/Graphics/Material.hpp"
+#include "../../Engine/Graphics/Shader.hpp"
+#include "../../Engine/Graphics/MeshGenerator3D.hpp"
+#include "../../Engine/UI/UIRenderer.hpp"
+#include "../../Engine/Platform/Input.hpp"
+#include "../../Engine/Core/Time.hpp"
+#include <imgui.h>
 #include <glm/gtc/matrix_transform.hpp>
 
 ClothSimulationApp::ClothSimulationApp() : Application("Cloth Simulation") {
@@ -17,7 +19,7 @@ void ClothSimulationApp::OnInit() {
     UIRenderer::Init();
     
     m_Scene = CreateRef<Scene>("ClothScene");
-    GetSceneManager()->SetActiveScene(m_Scene);
+    GetSceneManager().SetActiveScene(m_Scene);
     
     // Create shader
     const char* vertexSrc = R"(
@@ -140,41 +142,7 @@ void ClothSimulationApp::CreateScene() {
 }
 
 void ClothSimulationApp::CreateCloth() {
-    // Create soft body cloth
-    // This is a simplified version - full implementation would use SoftBody system
-    // For now, we'll create a mesh that can be updated
-    
-    std::vector<glm::vec3> vertices;
-    std::vector<glm::vec3> normals;
-    std::vector<uint32_t> indices;
-    
-    // Generate cloth grid
-    for (int y = 0; y < m_Height; ++y) {
-        for (int x = 0; x < m_Width; ++x) {
-            float px = (x - m_Width / 2.0f) * m_Spacing;
-            float py = 2.0f;
-            float pz = (y - m_Height / 2.0f) * m_Spacing;
-            
-            vertices.push_back(glm::vec3(px, py, pz));
-            normals.push_back(glm::vec3(0, 1, 0));
-            
-            // Create triangles
-            if (x < m_Width - 1 && y < m_Height - 1) {
-                int i = y * m_Width + x;
-                indices.push_back(i);
-                indices.push_back(i + m_Width);
-                indices.push_back(i + 1);
-                
-                indices.push_back(i + 1);
-                indices.push_back(i + m_Width);
-                indices.push_back(i + m_Width + 1);
-            }
-        }
-    }
-    
     // Create mesh from vertices
-    // Note: This would need proper mesh creation API
-    // For now, we'll create a placeholder
     m_ClothMesh = MeshGenerator3D::CreatePlane(
         (m_Width - 1) * m_Spacing,
         (m_Height - 1) * m_Spacing,
@@ -191,9 +159,7 @@ void ClothSimulationApp::CreateCloth() {
 }
 
 void ClothSimulationApp::UpdateCloth(float deltaTime) {
-    // Update cloth physics
-    // This would integrate with SoftBody system
-    // For now, placeholder
+    // Update cloth physics - placeholder
 }
 
 void ClothSimulationApp::RenderUI() {
@@ -224,4 +190,3 @@ void ClothSimulationApp::RenderUI() {
 GameEngine::Application* GameEngine::CreateApplication() {
     return new ClothSimulationApp();
 }
-

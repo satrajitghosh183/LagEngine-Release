@@ -54,9 +54,14 @@ namespace GameEngine {
         bool SaveScene(const std::string& name, const std::string& filepath);
         
         /**
-         * @brief Set active scene
+         * @brief Set active scene by name
          */
         void SetActiveScene(const std::string& name);
+        
+        /**
+         * @brief Set active scene directly
+         */
+        void SetActiveScene(const Ref<Scene>& scene);
         
         /**
          * @brief Get active scene

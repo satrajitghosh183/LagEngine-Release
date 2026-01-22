@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef GAMEENGINE_ENTITY_HPP
+#define GAMEENGINE_ENTITY_HPP
+
 #include "../Core/Base.hpp"
 #include "../Core/UUID.hpp"
 #include <string>
@@ -121,3 +124,5 @@ namespace GameEngine {
         friend class Scene;
     };
 }
+
+#endif // GAMEENGINE_ENTITY_HPP

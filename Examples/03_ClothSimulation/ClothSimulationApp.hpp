@@ -1,9 +1,9 @@
 #pragma once
 
-#include <GameEngine/Core/Application.hpp>
-#include <GameEngine/Scene/Scene.hpp>
-#include <GameEngine/Physics/SoftBody/SoftBody.hpp>
-#include <GameEngine/UI/UIRenderer.hpp>
+#include "../../Engine/Core/Application.hpp"
+#include "../../Engine/Scene/Scene.hpp"
+#include "../../Engine/Physics/SoftBody/SoftBody.hpp"
+#include "../../Engine/UI/UIRenderer.hpp"
 #include <memory>
 #include <vector>
 
@@ -27,7 +27,7 @@ private:
     
 private:
     Ref<Scene> m_Scene;
-    Ref<Physics::SoftBody> m_Cloth;
+    Ref<Physics::ClothBody> m_Cloth;
     
     Entity m_CameraEntity;
     Entity m_Ground;
@@ -49,4 +49,3 @@ private:
     float m_CameraDistance = 5.0f;
     glm::vec3 m_CameraTarget = glm::vec3(0, 1, 0);
 };
-

@@ -8,10 +8,10 @@ file(GLOB_RECURSE ENGINE_SOURCES
     "ParticleSystem/*.cpp"
     "Platform/*.cpp"
     "Resources/*.cpp"
-    "UI/*.cpp"
     "Utilities/*.cpp"
     "Scripting/*.cpp"
     "Animation/*.cpp"
+    "UI/*.cpp"
 )
 
 file(GLOB_RECURSE ENGINE_HEADERS
@@ -23,10 +23,10 @@ file(GLOB_RECURSE ENGINE_HEADERS
     "ParticleSystem/*.hpp"
     "Platform/*.hpp"
     "Resources/*.hpp"
-    "UI/*.hpp"
     "Utilities/*.hpp"
     "Scripting/*.hpp"
     "Animation/*.hpp"
+    "UI/*.hpp"
 )
 
 # Create engine library
@@ -54,11 +54,19 @@ target_link_libraries(GameEngine
         glfw
         glad
         glm
-        imgui
         nlohmann_json
+        imgui
+        lua
     PRIVATE
         stb_image
 )
+
+# Optional: Link ImGui if available (for backward compatibility, but Editor should link it)
+# Editor target will link imgui separately
+if(TARGET imgui)
+    # Only link if explicitly requested (for backward compatibility)
+    # target_link_libraries(GameEngine PUBLIC imgui)
+endif()
 
 # Platform-specific libraries
 if(WIN32)

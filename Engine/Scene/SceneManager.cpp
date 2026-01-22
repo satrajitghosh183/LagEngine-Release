@@ -106,6 +106,32 @@ namespace GameEngine {
         GE_CORE_INFO("Active scene set to: {0}", name);
     }
 
+    void SceneManager::SetActiveScene(const Ref<Scene>& scene) {
+        if (!scene) {
+            GE_CORE_ERROR("Cannot set null scene as active");
+            return;
+        }
+        
+        // Stop current scene
+        if (m_ActiveScene) {
+            m_ActiveScene->OnStop();
+        }
+        
+        // Set new active scene
+        m_ActiveScene = scene;
+        m_ActiveSceneName = scene->GetName();
+        
+        // Add to scenes map if not already present
+        if (m_Scenes.find(m_ActiveSceneName) == m_Scenes.end()) {
+            m_Scenes[m_ActiveSceneName] = scene;
+        }
+        
+        // Start new scene
+        m_ActiveScene->OnStart();
+        
+        GE_CORE_INFO("Active scene set to: {0}", m_ActiveSceneName);
+    }
+
     Ref<Scene> SceneManager::GetScene(const std::string& name) {
         auto it = m_Scenes.find(name);
         if (it != m_Scenes.end()) {

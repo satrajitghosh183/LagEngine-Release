@@ -1,8 +1,59 @@
 #include "RobotArmApp.hpp"
-#include <GameEngine/Graphics/MeshGenerator3D.hpp>
-#include <GameEngine/Utilities/Debug/DebugDraw.hpp>
-#include <GameEngine/Platform/Input.hpp>
-#include <GameEngine/Core/MathUtils.hpp>
+#include "../../Engine/Core/EntryPoint.hpp"
+#include "../../Engine/Graphics/MeshGenerator3D.hpp"
+#include "../../Engine/Utilities/Debug/DebugDraw.hpp"
+#include "../../Engine/Platform/Input.hpp"
+#include "../../Engine/Core/Time.hpp"
+#include "../../Engine/Scene/Components/TransformComponent.hpp"
+#include "../../Engine/Scene/Components/MeshRendererComponent.hpp"
+#include "../../Engine/Scene/Components/CameraComponent.hpp"
+#include "../../Engine/Graphics/Material.hpp"
+#include "../../Engine/Graphics/Shader.hpp"
+#include "../../Engine/Graphics/RenderCommand.hpp"
+#include <imgui.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <cmath>
+
+// Simple shader for rendering
+static Ref<Shader> CreateBasicShader() {
+    const char* vertexSrc = R"(
+        #version 450 core
+        layout(location = 0) in vec3 a_Position;
+        layout(location = 1) in vec3 a_Normal;
+        
+        uniform mat4 u_ViewProjection;
+        uniform mat4 u_Transform;
+        
+        out vec3 v_Normal;
+        out vec3 v_Position;
+        
+        void main() {
+            v_Position = vec3(u_Transform * vec4(a_Position, 1.0));
+            v_Normal = mat3(transpose(inverse(u_Transform))) * a_Normal;
+            gl_Position = u_ViewProjection * vec4(v_Position, 1.0);
+        }
+    )";
+    
+    const char* fragmentSrc = R"(
+        #version 450 core
+        layout(location = 0) out vec4 FragColor;
+        
+        in vec3 v_Normal;
+        in vec3 v_Position;
+        
+        uniform vec3 u_Color;
+        uniform vec3 u_LightDir;
+        
+        void main() {
+            vec3 normal = normalize(v_Normal);
+            float diff = max(dot(normal, -u_LightDir), 0.3);
+            vec3 color = u_Color * diff;
+            FragColor = vec4(color, 1.0);
+        }
+    )";
+    
+    return CreateRef<Shader>("Basic", vertexSrc, fragmentSrc);
+}
 
 RobotArmApp::RobotArmApp()
     : Application("Robot Arm - Inverse Kinematics") {
@@ -13,30 +64,44 @@ void RobotArmApp::OnInit() {
     DebugDraw::Init();
     
     m_Scene = CreateRef<Scene>("RobotArmScene");
+    GetSceneManager().SetActiveScene(m_Scene);
+    
     m_BasePosition = glm::vec3(0, 0, 0);
     m_TargetPosition = glm::vec3(3, 2, 0);
+    
+    auto basicShader = CreateBasicShader();
     
     CreateRobotArm();
     
     // Create camera
     m_CameraEntity = m_Scene->CreateEntity("Camera");
     m_CameraEntity.AddComponent<CameraComponent>();
+    m_Scene->SetMainCamera(m_CameraEntity);
     
     // Create target visualization
     m_TargetEntity = m_Scene->CreateEntity("Target");
-    auto& targetTransform = m_TargetEntity.GetComponent<TransformComponent>();
+    auto& targetTransform = m_TargetEntity.AddComponent<TransformComponent>();
     targetTransform.Position = m_TargetPosition;
     targetTransform.Scale = glm::vec3(0.3f);
     
-    auto& targetMesh = m_TargetEntity.AddComponent<MeshRendererComponent>();
-    targetMesh.Mesh = MeshGenerator3D::CreateSphere(0.5f);
-    targetMesh.Material = CreateRef<Material>();
-    targetMesh.Material->Albedo = glm::vec3(1, 0, 0);
+    auto targetMesh = MeshGenerator3D::CreateSphere(0.5f, 16, 8);
+    auto targetMaterial = CreateRef<Material>(basicShader);
+    targetMaterial->SetVec3("u_Color", glm::vec3(1, 0, 0));
+    targetMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+    m_TargetEntity.AddComponent<MeshRendererComponent>(targetMesh, targetMaterial);
     
     GE_INFO("Robot Arm IK initialized!");
 }
 
 void RobotArmApp::CreateRobotArm() {
+    auto basicShader = CreateBasicShader();
+    
+    // Clear old links
+    for (auto& link : m_ArmLinks) {
+        if (link.Visual.IsValid()) {
+            m_Scene->DestroyEntity(link.Visual);
+        }
+    }
     m_ArmLinks.clear();
     
     glm::vec3 currentPos = m_BasePosition;
@@ -49,17 +114,18 @@ void RobotArmApp::CreateRobotArm() {
         
         // Create visual
         link.Visual = m_Scene->CreateEntity("Link_" + std::to_string(i));
-        auto& transform = link.Visual.GetComponent<TransformComponent>();
+        auto& transform = link.Visual.AddComponent<TransformComponent>();
         transform.Position = currentPos;
         transform.Scale = glm::vec3(0.2f, m_LinkLength, 0.2f);
         
-        auto& mesh = link.Visual.AddComponent<MeshRendererComponent>();
-        mesh.Mesh = MeshGenerator3D::CreateCylinder(0.5f, 1.0f);
-        mesh.Material = CreateRef<Material>();
+        auto linkMesh = MeshGenerator3D::CreateCylinder(0.5f, 1.0f, 16);
+        auto linkMaterial = CreateRef<Material>(basicShader);
         
         // Color gradient
         float t = (float)i / m_NumLinks;
-        mesh.Material->Albedo = glm::mix(glm::vec3(0.2f, 0.6f, 0.8f), glm::vec3(0.8f, 0.3f, 0.2f), t);
+        linkMaterial->SetVec3("u_Color", glm::mix(glm::vec3(0.2f, 0.6f, 0.8f), glm::vec3(0.8f, 0.3f, 0.2f), t));
+        linkMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+        link.Visual.AddComponent<MeshRendererComponent>(linkMesh, linkMaterial);
         
         m_ArmLinks.push_back(link);
         currentPos.y += m_LinkLength;
@@ -79,14 +145,14 @@ void RobotArmApp::OnUpdate(float deltaTime) {
     UpdateArmVisuals();
     
     // Update camera
-    auto& cam = m_CameraEntity.GetComponent<CameraComponent>().GetCamera();
-    float camX = m_CameraDistance * cos(Math::ToRadians(m_CameraYaw)) * cos(Math::ToRadians(m_CameraPitch));
-    float camY = m_CameraDistance * sin(Math::ToRadians(m_CameraPitch));
-    float camZ = m_CameraDistance * sin(Math::ToRadians(m_CameraYaw)) * cos(Math::ToRadians(m_CameraPitch));
-    cam.SetPosition(glm::vec3(camX, camY, camZ));
-    cam.LookAt(glm::vec3(0, m_LinkLength * m_NumLinks * 0.5f, 0));
+    auto& camTransform = m_CameraEntity.GetComponent<TransformComponent>();
+    float camX = m_CameraDistance * cos(glm::radians(m_CameraYaw)) * cos(glm::radians(m_CameraPitch));
+    float camY = m_CameraDistance * sin(glm::radians(m_CameraPitch));
+    float camZ = m_CameraDistance * sin(glm::radians(m_CameraYaw)) * cos(glm::radians(m_CameraPitch));
+    camTransform.Position = glm::vec3(camX, camY, camZ);
+    camTransform.LookAt(glm::vec3(0, m_LinkLength * m_NumLinks * 0.5f, 0));
     
-    m_Scene->OnUpdate(deltaTime);
+    m_Scene->Update(deltaTime);
 }
 
 void RobotArmApp::SolveIK(const glm::vec3& target) {
@@ -101,7 +167,7 @@ void RobotArmApp::ForwardPass(const glm::vec3& target) {
     // Start from end effector, work towards base
     m_ArmLinks.back().Position = target;
     
-    for (int i = m_ArmLinks.size() - 2; i >= 0; i--) {
+    for (int i = static_cast<int>(m_ArmLinks.size()) - 2; i >= 0; i--) {
         glm::vec3& current = m_ArmLinks[i].Position;
         const glm::vec3& next = m_ArmLinks[i + 1].Position;
         float length = m_ArmLinks[i].Length;
@@ -115,7 +181,7 @@ void RobotArmApp::BackwardPass(const glm::vec3& base) {
     // Start from base, work towards end effector
     m_ArmLinks[0].Position = base;
     
-    for (int i = 1; i < m_ArmLinks.size(); i++) {
+    for (size_t i = 1; i < m_ArmLinks.size(); i++) {
         glm::vec3& current = m_ArmLinks[i].Position;
         const glm::vec3& prev = m_ArmLinks[i - 1].Position;
         float length = m_ArmLinks[i - 1].Length;
@@ -126,7 +192,7 @@ void RobotArmApp::BackwardPass(const glm::vec3& base) {
 }
 
 void RobotArmApp::UpdateArmVisuals() {
-    for (int i = 0; i < m_ArmLinks.size(); i++) {
+    for (size_t i = 0; i < m_ArmLinks.size(); i++) {
         auto& link = m_ArmLinks[i];
         auto& transform = link.Visual.GetComponent<TransformComponent>();
         
@@ -141,7 +207,7 @@ void RobotArmApp::UpdateArmVisuals() {
         glm::vec3 direction = glm::normalize(end - start);
         glm::vec3 up = glm::vec3(0, 1, 0);
         
-        if (abs(glm::dot(direction, up)) < 0.999f) {
+        if (std::abs(glm::dot(direction, up)) < 0.999f) {
             glm::vec3 right = glm::normalize(glm::cross(up, direction));
             glm::vec3 newUp = glm::cross(direction, right);
             
@@ -150,7 +216,7 @@ void RobotArmApp::UpdateArmVisuals() {
             rotMatrix[1] = direction;
             rotMatrix[2] = newUp;
             
-            transform.Rotation = glm::degrees(glm::eulerAngles(glm::quat_cast(rotMatrix)));
+            transform.Rotation = glm::quat_cast(rotMatrix);
         }
     }
 }
@@ -191,14 +257,11 @@ void RobotArmApp::OnRender() {
     RenderCommand::SetClearColor({0.1f, 0.1f, 0.15f, 1.0f});
     RenderCommand::Clear();
     
-    auto& cam = m_CameraEntity.GetComponent<CameraComponent>().GetCamera();
-    m_Scene->OnRender(cam);
-    
     // Debug draw
     DebugDraw::DrawGrid(10.0f, 10);
     
     // Draw arm chain
-    for (int i = 0; i < m_ArmLinks.size(); i++) {
+    for (size_t i = 0; i < m_ArmLinks.size(); i++) {
         glm::vec3 start = m_ArmLinks[i].Position;
         glm::vec3 end = (i < m_ArmLinks.size() - 1) ? m_ArmLinks[i + 1].Position : m_TargetPosition;
         
@@ -210,7 +273,6 @@ void RobotArmApp::OnRender() {
     DebugDraw::DrawCross(m_TargetPosition, 0.5f, glm::vec3(1, 0, 0), 0.0f);
     
     DebugDraw::Update(Time::GetDeltaTime());
-    DebugDraw::Render(cam);
     
     RenderUI();
 }
