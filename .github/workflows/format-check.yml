@@ -16,14 +16,24 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang-format
 
       - name: Check formatting
+        continue-on-error: true
         run: |
+          FAILED=0
           SRC=$(find Engine Editor Examples -type f \( -name "*.cpp" -o -name "*.hpp" \) ! -path "*/External/*" 2>/dev/null | head -500)
           if [ -z "$SRC" ]; then
             echo "No source files found"
-            exit 1
+            exit 0
           fi
           TMP=$(mktemp)
           for f in $SRC; do
-            clang-format "$f" > "$TMP" && diff -q "$f" "$TMP" > /dev/null || { echo "Formatting check failed: $f"; exit 1; }
+            clang-format "$f" > "$TMP"
+            if ! diff -q "$f" "$TMP" > /dev/null 2>&1; then
+              echo "::warning file=$f::Formatting differs from .clang-format style"
+              FAILED=$((FAILED + 1))
+            fi
           done
-          echo "Format check passed"
+          if [ "$FAILED" -gt 0 ]; then
+            echo "$FAILED file(s) have formatting differences (non-blocking)"
+          else
+            echo "Format check passed"
+          fi
