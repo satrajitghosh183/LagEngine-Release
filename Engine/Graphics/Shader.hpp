@@ -55,6 +55,7 @@ namespace GameEngine {
         /**
          * @brief Set uniform values
          */
+        void SetUniformBool(const std::string& name, bool value);
         void SetUniformInt(const std::string& name, int value);
         void SetUniformIntArray(const std::string& name, int* values, uint32_t count);
         void SetUniformFloat(const std::string& name, float value);
@@ -68,6 +69,16 @@ namespace GameEngine {
          * @brief Hot-reload shader from disk
          */
         void Reload();
+
+        /**
+         * @brief Hot-reload shader from source strings (for Shader Assistant)
+         */
+        void ReloadFromSource(const std::string& vertexSrc, const std::string& fragmentSrc);
+
+        /**
+         * @brief Get the OpenGL program ID
+         */
+        uint32_t GetRendererID() const { return m_RendererID; }
         
     private:
         void CompileShaders(const std::string& vertexSrc, const std::string& fragmentSrc);

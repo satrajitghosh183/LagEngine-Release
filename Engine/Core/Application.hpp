@@ -10,6 +10,10 @@
 #include <memory>
 
 namespace GameEngine {
+    class RenderPath; // Forward declaration
+}
+
+namespace GameEngine {
 
     // Forward declaration
     class FrameScheduler;
@@ -52,18 +56,42 @@ namespace GameEngine {
         
         /**
          * @brief Get application singleton instance
+         * @return Reference to application, or throws if not initialized
          */
-        static Application& Get() { return *s_Instance; }
+        static Application& Get();
         
         /**
-         * @brief Get window instance
+         * @brief Get application singleton pointer (may be null)
          */
-        Window& GetWindow() { return *m_Window; }
+        static Application* GetPtr() { return s_Instance; }
+        
+        /**
+         * @brief Get window instance (valid only when not headless)
+         */
+        Window* GetWindowPtr() { return m_Window.get(); }
+        Window& GetWindow();
         
         /**
          * @brief Get scene manager
          */
         SceneManager& GetSceneManager() { return *m_SceneManager; }
+
+        /**
+         * @brief Get runtime config
+         */
+        const RuntimeConfig& GetConfig() const { return m_Config; }
+        
+        /**
+         * @brief Activate a render path (Wicked Engine style)
+         * @param path Render path to activate
+         * @param fadeSeconds Fade transition time (0 = instant)
+         */
+        void ActivatePath(Ref<RenderPath> path, float fadeSeconds = 0.0f);
+        
+        /**
+         * @brief Get current active render path
+         */
+        Ref<RenderPath> GetActiveRenderPath() const { return m_ActiveRenderPath; }
         
     protected:
         /**
@@ -101,11 +129,13 @@ namespace GameEngine {
         Scope<Window> m_Window;
         Scope<SceneManager> m_SceneManager;
         Scope<FrameScheduler> m_FrameScheduler;
+        Ref<RenderPath> m_ActiveRenderPath;
         
         bool m_Running;
         bool m_Minimized;
+        bool m_Initialized;
         float m_FixedTimestepAccumulator;
-        
+
         std::string m_Name;
     };
     

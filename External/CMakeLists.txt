@@ -87,12 +87,13 @@ if(UNIX)
     target_link_libraries(lua PUBLIC m dl)
 endif()
 
-# OpenAL Soft (disabled due to path issues with spaces in WSL)
-# Uncomment if you move project to a path without spaces
-# if(UNIX OR WIN32)
-#     set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
-#     set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
-#     set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
-#     add_subdirectory(openal-soft)
-# endif()
+# OpenAL Soft
+if(UNIX OR WIN32)
+    set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL_CONFIG OFF CACHE BOOL "" FORCE)
+    add_subdirectory(openal-soft)
+endif()
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../Core/Base.hpp"
-#include "../../Graphics/RigidBody.hpp"
+#include "../RigidBody.hpp"
 #include <glm/glm.hpp>
 
 namespace GameEngine {

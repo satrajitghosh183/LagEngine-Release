@@ -1,0 +1,7 @@
+{
+    "name": "Robot Arm FK/IK",
+    "description": "6-DOF robot arm with forward/inverse kinematics, DH parameters, and PID joint control.",
+    "category": "Robotics",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

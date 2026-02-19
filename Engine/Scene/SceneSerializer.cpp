@@ -4,6 +4,18 @@
 #include "Components/MeshRendererComponent.hpp"
 #include "Components/RigidBodyComponent.hpp"
 #include "Components/CameraComponent.hpp"
+#include "Components/ColliderComponent.hpp"
+#include "Components/LightComponent.hpp"
+#include "Components/ClothComponent.hpp"
+#include "Components/JointComponent.hpp"
+#include "Components/FluidEmitterComponent.hpp"
+#include "Components/ScriptComponent.hpp"
+#include "Components/GPUParticleComponent.hpp"
+#include "Components/RobotArmComponent.hpp"
+#include "Components/SoftBodyComponent.hpp"
+#include "Components/SpriteComponent.hpp"
+#include "Components/SpriteAnimatorComponent.hpp"
+#include "Prefab.hpp"
 #include <fstream>
 #include <sstream>
 
@@ -264,6 +276,54 @@ namespace GameEngine {
         }
         else if (type == "CameraComponent") {
             auto& comp = entity.AddComponent<CameraComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "ColliderComponent") {
+            auto& comp = entity.AddComponent<ColliderComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "LightComponent") {
+            auto& comp = entity.AddComponent<LightComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "ClothComponent") {
+            auto& comp = entity.AddComponent<ClothComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "JointComponent") {
+            auto& comp = entity.AddComponent<JointComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "FluidEmitterComponent") {
+            auto& comp = entity.AddComponent<FluidEmitterComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "ScriptComponent") {
+            auto& comp = entity.AddComponent<ScriptComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "PrefabInstanceComponent") {
+            auto& comp = entity.AddComponent<PrefabInstanceComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "GPUParticleComponent") {
+            auto& comp = entity.AddComponent<GPUParticleComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "RobotArmComponent") {
+            auto& comp = entity.AddComponent<RobotArmComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "SoftBodyComponent") {
+            auto& comp = entity.AddComponent<SoftBodyComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "SpriteComponent") {
+            auto& comp = entity.AddComponent<SpriteComponent>();
+            comp.Deserialize(componentJson);
+        }
+        else if (type == "SpriteAnimatorComponent") {
+            auto& comp = entity.AddComponent<SpriteAnimatorComponent>();
             comp.Deserialize(componentJson);
         }
         else {

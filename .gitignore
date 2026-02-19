@@ -2,6 +2,7 @@
 # Build directories
 # ===================
 build/
+build*/
 cmake-build-*/
 out/
 bin/
@@ -75,6 +76,9 @@ DerivedData/
 *.out
 *.app
 *.dSYM/
+*.pdb
+*.ilk
+*.exp
 
 # ===================
 # OS specific
@@ -91,6 +95,7 @@ DerivedData/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+nul
 
 # Linux
 *~
@@ -124,3 +129,16 @@ temp/
 # ===================
 vcpkg_installed/
 conan/
+
+# ===================
+# Project-specific
+# ===================
+# Old/archived code
+
+older-builds/
+
+# Demo/experiment directories
+RL_Demo/
+
+# Asset metadata (auto-generated)
+*.meta

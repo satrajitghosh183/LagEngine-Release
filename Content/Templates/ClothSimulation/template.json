@@ -1,0 +1,7 @@
+{
+    "name": "Cloth Simulation",
+    "description": "Spring-mass cloth with wind forces, tearable constraints, and octree-accelerated collision.",
+    "category": "Physics",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

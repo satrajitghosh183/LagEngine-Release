@@ -9,6 +9,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <cstdint>
+#include <unordered_set>
 
 namespace GameEngine {
 
@@ -98,6 +99,7 @@ namespace GameEngine {
 
         static void WorkerThread(WorkerState* state);
         static JobQueue& GetLocalQueue();
+        static void MarkJobComplete(uint64_t jobId);
 
         static std::atomic<uint64_t> s_NextJobId;
         static std::atomic<uint32_t> s_ActiveJobs;
@@ -107,6 +109,22 @@ namespace GameEngine {
         static thread_local JobQueue* s_LocalQueue;
         static thread_local uint32_t s_WorkerId;
         static bool s_Initialized;
+
+        // Initialization barrier - workers wait until all are ready
+        static std::atomic<bool> s_WorkersReady;
+        static std::mutex s_InitMutex;
+        static std::condition_variable s_InitCV;
+
+        // Job completion tracking
+        static std::unordered_set<uint64_t> s_CompletedJobs;
+        static std::deque<uint64_t> s_CompletedJobOrder;
+        static std::mutex s_CompletionMutex;
+        static std::condition_variable s_CompletionCV;
+
+        static std::mutex s_AllDoneMutex;
+        static std::condition_variable s_AllDoneCV;
+
+        friend struct JobHandle;
     };
 
 }

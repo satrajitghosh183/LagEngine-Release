@@ -1,0 +1,193 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "Deferred PBR Scene",
+    "uuid": "e1f2a3b4c5d60001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "e1f2a3b4c5d60010",
+            "name": "Cube",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [-1.5, 0.5, 0.0],
+                    "rotation": [0.0, 45.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Cube",
+                    "material": {
+                        "albedo": [0.8, 0.2, 0.2, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.5,
+                        "ao": 1.0
+                    }
+                }
+            ]
+        },
+        {
+            "uuid": "e1f2a3b4c5d60011",
+            "name": "Sphere",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [1.5, 1.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Sphere",
+                    "material": {
+                        "albedo": [0.9, 0.9, 0.9, 1.0],
+                        "metallic": 1.0,
+                        "roughness": 0.1,
+                        "ao": 1.0
+                    }
+                }
+            ]
+        },
+        {
+            "uuid": "e1f2a3b4c5d60012",
+            "name": "Ground Plane",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [20.0, 0.1, 20.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Cube",
+                    "material": {
+                        "albedo": [0.5, 0.5, 0.5, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.8,
+                        "ao": 1.0
+                    }
+                }
+            ]
+        },
+        {
+            "uuid": "e1f2a3b4c5d60013",
+            "name": "Directional Light",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 10.0, 0.0],
+                    "rotation": [-50.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Directional",
+                    "color": [1.0, 0.95, 0.9],
+                    "intensity": 1.2,
+                    "castShadows": true
+                }
+            ]
+        },
+        {
+            "uuid": "e1f2a3b4c5d60014",
+            "name": "Point Light Red",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [-3.0, 2.0, 2.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Point",
+                    "color": [1.0, 0.3, 0.3],
+                    "intensity": 5.0,
+                    "range": 10.0,
+                    "castShadows": false
+                }
+            ]
+        },
+        {
+            "uuid": "e1f2a3b4c5d60015",
+            "name": "Point Light Blue",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [3.0, 2.0, -2.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Point",
+                    "color": [0.3, 0.3, 1.0],
+                    "intensity": 5.0,
+                    "range": 10.0,
+                    "castShadows": false
+                }
+            ]
+        },
+        {
+            "uuid": "e1f2a3b4c5d60016",
+            "name": "Point Light Green",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 3.0, 3.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Point",
+                    "color": [0.3, 1.0, 0.3],
+                    "intensity": 4.0,
+                    "range": 8.0,
+                    "castShadows": false
+                }
+            ]
+        },
+        {
+            "uuid": "e1f2a3b4c5d60017",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 3.0, 7.0],
+                    "rotation": [-15.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 1000.0,
+                    "isPrimary": true
+                }
+            ]
+        }
+    ]
+}

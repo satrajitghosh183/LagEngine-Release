@@ -1,0 +1,7 @@
+{
+    "name": "Particle Cannon",
+    "description": "Interactive particle cannon with burst emission mode and configurable velocity, spread, and lifetime.",
+    "category": "Particles",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

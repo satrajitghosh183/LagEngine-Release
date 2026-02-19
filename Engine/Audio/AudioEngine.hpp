@@ -73,7 +73,12 @@ namespace GameEngine {
          */
         static void Play3D(const std::string& clipPath, const glm::vec3& position, 
                           float volume = 1.0f, bool loop = false);
-        
+
+        /**
+         * @brief Stop playback of a clip by path (stops any source playing this clip)
+         */
+        static void StopClip(const std::string& clipPath);
+
         /**
          * @brief Load audio clip
          */

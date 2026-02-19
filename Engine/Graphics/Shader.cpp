@@ -1,5 +1,6 @@
 #include "Shader.hpp"
 #include "../Core/Logger.hpp"
+#include "../Core/RuntimePaths.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <fstream>
@@ -19,8 +20,10 @@ namespace GameEngine {
         auto count = lastDot == std::string::npos ? vertexPath.size() - lastSlash : lastDot - lastSlash;
         m_Name = vertexPath.substr(lastSlash, count);
         
-        std::string vertexSrc = ReadFile(vertexPath);
-        std::string fragmentSrc = ReadFile(fragmentPath);
+        std::string resolvedVert = RuntimePaths::ResolveShader(vertexPath);
+        std::string resolvedFrag = RuntimePaths::ResolveShader(fragmentPath);
+        std::string vertexSrc = ReadFile(resolvedVert);
+        std::string fragmentSrc = ReadFile(resolvedFrag);
         
         CompileShaders(vertexSrc, fragmentSrc);
         
@@ -110,8 +113,10 @@ namespace GameEngine {
         if (!m_VertexPath.empty() && !m_FragmentPath.empty()) {
             GE_CORE_INFO("Reloading shader '{0}'...", m_Name);
             
-            std::string vertexSrc = ReadFile(m_VertexPath);
-            std::string fragmentSrc = ReadFile(m_FragmentPath);
+            std::string resolvedVert = RuntimePaths::ResolveShader(m_VertexPath);
+            std::string resolvedFrag = RuntimePaths::ResolveShader(m_FragmentPath);
+            std::string vertexSrc = ReadFile(resolvedVert);
+            std::string fragmentSrc = ReadFile(resolvedFrag);
             
             // Delete old program
             glDeleteProgram(m_RendererID);
@@ -124,6 +129,14 @@ namespace GameEngine {
             
             GE_CORE_INFO("Shader '{0}' reloaded successfully", m_Name);
         }
+    }
+
+    void Shader::ReloadFromSource(const std::string& vertexSrc, const std::string& fragmentSrc) {
+        GE_CORE_INFO("Reloading shader '{0}' from source...", m_Name);
+        glDeleteProgram(m_RendererID);
+        m_UniformLocationCache.clear();
+        CompileShaders(vertexSrc, fragmentSrc);
+        GE_CORE_INFO("Shader '{0}' reloaded from source successfully", m_Name);
     }
 
     int Shader::GetUniformLocation(const std::string& name) {
@@ -140,6 +153,10 @@ namespace GameEngine {
         
         m_UniformLocationCache[name] = location;
         return location;
+    }
+
+    void Shader::SetUniformBool(const std::string& name, bool value) {
+        glUniform1i(GetUniformLocation(name), value ? 1 : 0);
     }
 
     void Shader::SetUniformInt(const std::string& name, int value) {

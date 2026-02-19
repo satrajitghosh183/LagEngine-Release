@@ -1,5 +1,5 @@
 #include "TransformComponent.hpp"
-#include "../Entity.hpp"
+#include "../Scene.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace GameEngine {
@@ -148,7 +148,7 @@ namespace GameEngine {
     }
 
     void TransformComponent::SetScale(const glm::vec3& scale) {
-        Scale *= scale;
+        Scale = scale;
         SetDirty();
     }
 

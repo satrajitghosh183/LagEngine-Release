@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Component.hpp"
-#include "../../Graphics/RigidBody.hpp"
+#include "../../Physics/RigidBody.hpp"
 #include <glm/glm.hpp>
 
 namespace GameEngine {
@@ -27,6 +27,7 @@ namespace GameEngine {
         void Deserialize(const nlohmann::json& data) override;
         
         void OnCreate() override;
+        void OnFixedUpdate(float fixedDeltaTime) override;
         void OnDestroy() override;
         
         /**

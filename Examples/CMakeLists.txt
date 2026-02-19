@@ -65,6 +65,19 @@ target_include_directories(RobotArm PRIVATE
     ${ENGINE_INCLUDE_DIR}
 )
 
+# Example 7: Wicked Style Template
+add_executable(WickedStyleTemplate
+    WickedStyleTemplate/WickedStyleTemplateApp.cpp
+    WickedStyleTemplate/WickedStyleTemplateApp.hpp
+    WickedStyleTemplate/main.cpp
+)
+target_link_libraries(WickedStyleTemplate PRIVATE GameEngine imgui)
+target_include_directories(WickedStyleTemplate PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR} 
+    ${ENGINE_INCLUDE_DIR}
+)
+target_compile_definitions(WickedStyleTemplate PRIVATE GAMEENGINE_INCLUDE_PATH="${CMAKE_SOURCE_DIR}/Engine")
+
 # Set output directory
 set_target_properties(
     HelloTriangle
@@ -73,6 +86,19 @@ set_target_properties(
     CharacterController
     FluidSimulation
     RobotArm
+    WickedStyleTemplate
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# Install example executables
+install(TARGETS
+    HelloTriangle
+    PhysicsDemo
+    ClothSimulation
+    CharacterController
+    FluidSimulation
+    RobotArm
+    WickedStyleTemplate
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

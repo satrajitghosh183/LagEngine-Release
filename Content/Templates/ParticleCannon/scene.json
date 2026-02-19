@@ -1,0 +1,85 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "Particle Cannon",
+    "uuid": "c2d3e4f5a6b70001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "c2d3e4f5a6b70010",
+            "name": "Particle Cannon",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 1.0, 0.0],
+                    "rotation": [30.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "GPUParticleComponent",
+                    "MaxParticles": 50000,
+                    "Gravity": [0.0, -4.0, 0.0],
+                    "Restitution": 0.6,
+                    "Damping": 0.98,
+                    "EmitHeight": 1.0,
+                    "FloorY": 0.0,
+                    "ParticleSize": 0.03,
+                    "EmitRate": 5000,
+                    "EmitVelocity": [0.0, 10.0, -8.0],
+                    "Spread": 0.3,
+                    "Lifetime": 4.0,
+                    "BurstMode": true,
+                    "BurstCount": 500
+                }
+            ]
+        },
+        {
+            "uuid": "c2d3e4f5a6b70011",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [5.0, 3.0, 5.0],
+                    "rotation": [-15.0, -45.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 1000.0,
+                    "isPrimary": true
+                }
+            ]
+        },
+        {
+            "uuid": "c2d3e4f5a6b70012",
+            "name": "Directional Light",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 10.0, 0.0],
+                    "rotation": [-45.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Directional",
+                    "color": [1.0, 0.95, 0.9],
+                    "intensity": 1.0,
+                    "castShadows": true
+                }
+            ]
+        }
+    ]
+}

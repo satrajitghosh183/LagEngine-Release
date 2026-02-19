@@ -1,0 +1,7 @@
+{
+    "name": "SPH Fluid Simulation",
+    "description": "Smoothed Particle Hydrodynamics fluid with spatial hash grid, pressure, and viscosity forces.",
+    "category": "Physics",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

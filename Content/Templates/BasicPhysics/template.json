@@ -1,0 +1,7 @@
+{
+    "name": "Basic Physics",
+    "description": "Simple rigid body physics with gravity, collisions, and basic shapes (box, sphere, capsule).",
+    "category": "Physics",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

@@ -9,6 +9,7 @@ namespace GameEngine {
      * @brief Input key codes (matching GLFW)
      */
     enum class KeyCode {
+        None = 0,
         Space = 32,
         Apostrophe = 39,
         Comma = 44,

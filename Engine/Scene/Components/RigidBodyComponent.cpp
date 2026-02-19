@@ -1,7 +1,8 @@
 #include "RigidBodyComponent.hpp"
 #include "TransformComponent.hpp"
-#include "../Entity.hpp"
+#include "ColliderComponent.hpp"
 #include "../Scene.hpp"
+#include "../../Core/Logger.hpp"
 
 namespace GameEngine {
 
@@ -62,7 +63,9 @@ namespace GameEngine {
         switch (Type) {
             case BodyType::Static:    physicsType = Physics::RigidBody::BodyType::Static; break;
             case BodyType::Kinematic: physicsType = Physics::RigidBody::BodyType::Kinematic; break;
-            case BodyType::Dynamic:   physicsType = Physics::RigidBody::BodyType::Dynamic; break;
+            case BodyType::Dynamic:   
+            default:
+                physicsType = Physics::RigidBody::BodyType::Dynamic; break;
         }
         
         m_RigidBody = CreateRef<Physics::RigidBody>(physicsType, Mass);
@@ -77,13 +80,53 @@ namespace GameEngine {
         // Sync initial position from transform
         SyncFromTransform();
         
-        // Register with physics world (if scene has one)
-        // TODO: Get physics world from scene and add rigid body
+        // Check if there's a collider component and get its shape
+        if (Owner && Owner->HasComponent<ColliderComponent>()) {
+            auto& collider = Owner->GetComponent<ColliderComponent>();
+            if (collider.GetShape()) {
+                m_RigidBody->SetCollisionShape(collider.GetShape());
+                GE_CORE_DEBUG("RigidBodyComponent: Attached collision shape from ColliderComponent");
+            }
+        }
+        
+        // Register with physics world
+        if (Owner) {
+            Scene* scene = Owner->GetScene();
+            if (scene) {
+                auto physicsWorld = scene->GetPhysicsWorld();
+                if (physicsWorld) {
+                    physicsWorld->AddRigidBody(m_RigidBody);
+                    GE_CORE_DEBUG("RigidBodyComponent: Added to physics world");
+                }
+            }
+        }
+    }
+
+    void RigidBodyComponent::OnFixedUpdate(float fixedDeltaTime) {
+        // Sync transform from physics body after physics step
+        // Only for dynamic bodies - static and kinematic are controlled externally
+        if (!m_RigidBody || !Enabled) return;
+        
+        if (Type == BodyType::Dynamic) {
+            SyncToTransform();
+        } else if (Type == BodyType::Kinematic) {
+            // Kinematic bodies: sync physics from transform
+            SyncFromTransform();
+        }
     }
 
     void RigidBodyComponent::OnDestroy() {
         // Unregister from physics world
-        // TODO: Remove from physics world
+        if (m_RigidBody && Owner) {
+            Scene* scene = Owner->GetScene();
+            if (scene) {
+                auto physicsWorld = scene->GetPhysicsWorld();
+                if (physicsWorld) {
+                    physicsWorld->RemoveRigidBody(m_RigidBody);
+                    GE_CORE_DEBUG("RigidBodyComponent: Removed from physics world");
+                }
+            }
+        }
         m_RigidBody.reset();
     }
 
@@ -104,6 +147,7 @@ namespace GameEngine {
             auto& transform = Owner->GetComponent<TransformComponent>();
             transform.SetWorldPosition(m_RigidBody->GetPosition());
             transform.Rotation = m_RigidBody->GetRotation();
+            transform.SetDirty();  // Mark transform cache as dirty so rendering sees the change
         }
     }
 

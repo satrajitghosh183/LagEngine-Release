@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../Base.hpp"
-#include "../../Graphics/RigidBody.hpp"
+#include "../../Physics/RigidBody.hpp"
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>

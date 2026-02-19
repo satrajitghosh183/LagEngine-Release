@@ -76,6 +76,11 @@ namespace GameEngine {
         // TODO: Implement with OpenAL
     }
 
+    void AudioEngine::StopClip(const std::string& clipPath) {
+        // TODO: When OpenAL is implemented, stop any source playing this clip
+        (void)clipPath;
+    }
+
     Ref<AudioClip> AudioEngine::LoadClip(const std::string& path) {
         // Check if already loaded
         auto it = s_LoadedClips.find(path);

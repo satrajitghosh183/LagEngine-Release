@@ -1,0 +1,80 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "GPU Particles 100K",
+    "uuid": "a1b2c3d4e5f60001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "a1b2c3d4e5f60010",
+            "name": "Particle Emitter",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 3.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "GPUParticleComponent",
+                    "MaxParticles": 100000,
+                    "Gravity": [0.0, -9.81, 0.0],
+                    "Restitution": 0.5,
+                    "Damping": 0.99,
+                    "EmitHeight": 3.0,
+                    "FloorY": 0.0,
+                    "ParticleSize": 0.02,
+                    "EmitRate": 1000
+                }
+            ]
+        },
+        {
+            "uuid": "a1b2c3d4e5f60011",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 4.0, 8.0],
+                    "rotation": [-20.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 1000.0,
+                    "isPrimary": true
+                }
+            ]
+        },
+        {
+            "uuid": "a1b2c3d4e5f60012",
+            "name": "Directional Light",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 10.0, 0.0],
+                    "rotation": [-45.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Directional",
+                    "color": [1.0, 0.95, 0.9],
+                    "intensity": 1.0,
+                    "castShadows": true
+                }
+            ]
+        }
+    ]
+}

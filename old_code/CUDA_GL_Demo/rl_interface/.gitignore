@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# RL Models and Logs
+rl_models/
+rl_logs/
+*.zip
+
+# Data files
+*.json
+*.csv
+rl_metrics_temp.json
+temp_metrics.json
+temp_collect_metrics.json
+evaluation_results.json
+collected_data.json
+collected_data.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+

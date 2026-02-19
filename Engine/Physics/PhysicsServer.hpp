@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../Core/Runtime/IPhysicsServer.hpp"
-#include "../Graphics/PhysicsWorld.hpp"
-#include "../Graphics/RigidBody.hpp"
+#include "PhysicsWorld.hpp"
+#include "RigidBody.hpp"
 #include <glm/glm.hpp>
 #include <vector>
 
@@ -36,6 +36,8 @@ namespace GameEngine {
         std::vector<Constraint> GetConstraints() const override;
 
     private:
+        void UpdateContactCache();
+        
         Ref<Physics::PhysicsWorld> m_PhysicsWorld;
         std::vector<ContactPoint> m_Contacts;
         std::vector<CollisionShape> m_CollisionShapes;

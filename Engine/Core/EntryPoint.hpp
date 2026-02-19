@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Application.hpp"
+#include "GraphicsOptions.hpp"
 
 /**
  * @brief Engine entry point
@@ -26,13 +27,12 @@
 extern GameEngine::Application* GameEngine::CreateApplication();
 
 int main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-    
+    GameEngine::GraphicsOptions::Initialize(argc, argv);
     GameEngine::Application* app = GameEngine::CreateApplication();
-    app->Run();
-    delete app;
-    
+    if (app) {
+        app->Run();
+        delete app;
+    }
     return 0;
 }
 
@@ -42,13 +42,12 @@ int main(int argc, char** argv) {
 extern GameEngine::Application* GameEngine::CreateApplication();
 
 int main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-    
+    GameEngine::GraphicsOptions::Initialize(argc, argv);
     GameEngine::Application* app = GameEngine::CreateApplication();
-    app->Run();
-    delete app;
-    
+    if (app) {
+        app->Run();
+        delete app;
+    }
     return 0;
 }
 

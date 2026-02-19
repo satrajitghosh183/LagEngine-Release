@@ -9,7 +9,7 @@
 namespace GameEngine {
 
     Texture2D::Texture2D(const std::string& path)
-        : m_Path(path) {
+        : m_RendererID(0), m_Width(0), m_Height(0), m_Format(TextureFormat::None), m_Path(path) {
         
         // Load image using stb_image
         int width, height, channels;
@@ -84,7 +84,10 @@ namespace GameEngine {
     }
 
     Texture2D::~Texture2D() {
-        glDeleteTextures(1, &m_RendererID);
+        if (m_RendererID != 0) {
+            glDeleteTextures(1, &m_RendererID);
+            m_RendererID = 0;
+        }
     }
 
     void Texture2D::Bind(uint32_t slot) const {

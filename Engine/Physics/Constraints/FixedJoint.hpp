@@ -28,6 +28,7 @@ namespace Physics {
         glm::vec3 m_AnchorB;
         glm::quat m_RelativeRotation;
         glm::vec3 m_AccumulatedImpulse;
+        float m_DeltaTime = 0.016f;
     };
 
 }}

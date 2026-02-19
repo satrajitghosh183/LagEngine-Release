@@ -3,11 +3,13 @@
 #include "../Core/Events/WindowEvents.hpp"
 #include "../Core/Events/InputEvents.hpp"
 #include <glad/glad.h>
+#include <stdexcept>
 
 namespace GameEngine {
 
     static bool s_GLFWInitialized = false;
-    
+    static int s_GLFWWindowCount = 0;
+
     static void GLFWErrorCallback(int error, const char* description) {
         GE_CORE_ERROR("GLFW Error ({0}): {1}", error, description);
     }
@@ -35,14 +37,18 @@ namespace GameEngine {
         // Initialize GLFW
         if (!s_GLFWInitialized) {
             int success = glfwInit();
-            GE_CORE_ASSERT(success, "Could not initialize GLFW!");
+            if (!success) {
+                GE_CORE_ERROR("Could not initialize GLFW!");
+                throw std::runtime_error("Could not initialize GLFW!");
+            }
             glfwSetErrorCallback(GLFWErrorCallback);
             s_GLFWInitialized = true;
         }
         
         // Configure GLFW
+        // Using OpenGL 4.2 for WSL compatibility (WSLg Mesa D3D12 backend limit)
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         
         #ifdef __APPLE__
@@ -61,14 +67,29 @@ namespace GameEngine {
             nullptr
         );
         
-        GE_CORE_ASSERT(m_Window, "Failed to create GLFW window!");
-        
+        if (!m_Window) {
+            GE_CORE_ERROR("Failed to create GLFW window!");
+            throw std::runtime_error("Failed to create GLFW window!");
+        }
+        s_GLFWWindowCount++;
+
         // Make OpenGL context current
         glfwMakeContextCurrent(m_Window);
-        
+
         // Load OpenGL function pointers with GLAD
         int gladStatus = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
-        GE_CORE_ASSERT(gladStatus, "Failed to initialize GLAD!");
+        if (!gladStatus) {
+            GE_CORE_ERROR("Failed to initialize GLAD!");
+            glfwDestroyWindow(m_Window);
+            m_Window = nullptr;
+            s_GLFWWindowCount--;
+            if (s_GLFWWindowCount <= 0) {
+                s_GLFWWindowCount = 0;
+                glfwTerminate();
+                s_GLFWInitialized = false;
+            }
+            throw std::runtime_error("Failed to initialize GLAD!");
+        }
         
         GE_CORE_INFO("OpenGL Info:");
         GE_CORE_INFO("  Vendor:   {0}", (const char*)glGetString(GL_VENDOR));
@@ -86,8 +107,16 @@ namespace GameEngine {
     }
 
     void WindowGLFW::Shutdown() {
-        glfwDestroyWindow(m_Window);
-        glfwTerminate();
+        if (m_Window) {
+            glfwDestroyWindow(m_Window);
+            m_Window = nullptr;
+            s_GLFWWindowCount--;
+            if (s_GLFWWindowCount <= 0) {
+                s_GLFWWindowCount = 0;
+                glfwTerminate();
+                s_GLFWInitialized = false;
+            }
+        }
     }
 
     void WindowGLFW::OnUpdate() {
@@ -105,6 +134,26 @@ namespace GameEngine {
             glfwSwapInterval(0);
         
         m_Data.VSync = enabled;
+    }
+
+    void WindowGLFW::SetFullscreen(bool fullscreen) {
+        if (m_Data.Fullscreen == fullscreen) return;
+
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+
+        if (fullscreen) {
+            glfwGetWindowPos(m_Window, &m_Data.WindowedX, &m_Data.WindowedY);
+            m_Data.WindowedWidth = m_Data.Width;
+            m_Data.WindowedHeight = m_Data.Height;
+            glfwSetWindowMonitor(m_Window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+        } else {
+            int w = m_Data.WindowedWidth > 0 ? static_cast<int>(m_Data.WindowedWidth) : static_cast<int>(m_Data.Width);
+            int h = m_Data.WindowedHeight > 0 ? static_cast<int>(m_Data.WindowedHeight) : static_cast<int>(m_Data.Height);
+            glfwSetWindowMonitor(m_Window, nullptr, m_Data.WindowedX, m_Data.WindowedY, w, h, mode->refreshRate);
+        }
+
+        m_Data.Fullscreen = fullscreen;
     }
 
     void WindowGLFW::SetupCallbacks() {

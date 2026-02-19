@@ -4,6 +4,8 @@
 #include "../Scene/Entity.hpp"
 #include "../../External/lua/src/lua.hpp"
 #include <string>
+#include <mutex>
+#include <functional>
 
 namespace GameEngine {
 
@@ -34,6 +36,11 @@ namespace GameEngine {
         static bool LoadScript(const std::string& filepath);
         
         /**
+         * @brief Load startup.lua if it exists
+         */
+        static bool LoadStartupScript();
+        
+        /**
          * @brief Execute Lua code
          */
         static bool ExecuteString(const std::string& code);
@@ -52,12 +59,23 @@ namespace GameEngine {
          * @brief Get Lua state
          */
         static lua_State* GetLuaState() { return s_LuaState; }
+
+        /**
+         * @brief Set callback for Lua print() output (e.g. to show in scripting console)
+         */
+        static void SetPrintCallback(std::function<void(const std::string&)> cb);
         
     private:
         static void RegisterCoreFunctions();
         static void RegisterComponents();
         static void RegisterMathTypes();
+        static void RegisterApplicationAPI();
+        static void RegisterSceneAPI();
+        static void RegisterAudioAPI();
+        static void RegisterInputAPI();
         
         static lua_State* s_LuaState;
+        static std::mutex s_LuaMutex;
+        static std::function<void(const std::string&)> s_PrintCallback;
     };
 }

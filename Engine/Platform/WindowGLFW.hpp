@@ -37,6 +37,8 @@ namespace GameEngine {
         
         void SetVSync(bool enabled) override;
         bool IsVSync() const override { return m_Data.VSync; }
+        void SetFullscreen(bool fullscreen) override;
+        bool IsFullscreen() const override { return m_Data.Fullscreen; }
         
         void* GetNativeWindow() const override { return m_Window; }
         
@@ -52,6 +54,9 @@ namespace GameEngine {
             std::string Title;
             uint32_t Width, Height;
             bool VSync;
+            bool Fullscreen = false;
+            int WindowedX = 100, WindowedY = 100;
+            uint32_t WindowedWidth = 0, WindowedHeight = 0;
             EventCallbackFn EventCallback;
         };
         

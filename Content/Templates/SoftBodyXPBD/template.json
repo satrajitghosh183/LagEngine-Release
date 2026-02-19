@@ -1,0 +1,7 @@
+{
+    "name": "XPBD Soft Body",
+    "description": "Extended Position-Based Dynamics soft body with distance, bending, volume, and collision constraints.",
+    "category": "Physics",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

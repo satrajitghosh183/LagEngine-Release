@@ -1,0 +1,111 @@
+cmake_minimum_required(VERSION 3.22)
+project(CUDA_GL_Demo LANGUAGES C CXX CUDA)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+enable_language(CUDA)
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES 75)
+endif()
+set(CMAKE_CUDA_STANDARD 14)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+
+# GLFW (force X11 on WSL to avoid Wayland deps if desired)
+set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_X11     ON  CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  glfw
+  GIT_REPOSITORY https://github.com/glfw/glfw.git
+  GIT_TAG        3.4
+)
+FetchContent_MakeAvailable(glfw)
+
+find_package(OpenGL REQUIRED)
+
+file(GLOB SRC_FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/*.cu
+)
+
+add_executable(cuda_gl_demo
+  ${SRC_FILES}
+  src/shaders/particles.vert
+  src/shaders/particles.frag
+)
+
+# RL Interface executable
+add_executable(cuda_gl_demo_rl
+  rl_interface/main_rl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/gl_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/sim.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/interop.cu
+  src/shaders/particles.vert
+  src/shaders/particles.frag
+)
+
+# Vendored GLAD (generated in external/glad)
+add_library(gladlib STATIC ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/src/glad.c)
+target_include_directories(gladlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include)
+
+target_include_directories(cuda_gl_demo PRIVATE
+  ${glfw_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(cuda_gl_demo
+  PRIVATE
+    glfw
+    gladlib
+    OpenGL::GL
+)
+
+target_include_directories(cuda_gl_demo_rl PRIVATE
+  ${glfw_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(cuda_gl_demo_rl
+  PRIVATE
+    glfw
+    gladlib
+    OpenGL::GL
+)
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(cuda_gl_demo PRIVATE dl pthread)
+  target_link_libraries(cuda_gl_demo_rl PRIVATE dl pthread)
+endif()
+
+add_custom_command(TARGET cuda_gl_demo POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/particles.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/particles.frag
+    $<TARGET_FILE_DIR:cuda_gl_demo>)
+
+add_custom_command(TARGET cuda_gl_demo_rl POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/particles.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/particles.frag
+    $<TARGET_FILE_DIR:cuda_gl_demo_rl>)
+
+if (MSVC)
+  target_compile_options(cuda_gl_demo PRIVATE /W4)
+  target_compile_options(cuda_gl_demo_rl PRIVATE /W4)
+else()
+  target_compile_options(cuda_gl_demo PRIVATE -Wall -Wextra -Wno-unused-parameter)
+  target_compile_options(cuda_gl_demo_rl PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
+
+target_compile_options(cuda_gl_demo PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+  --use_fast_math
+>)
+
+target_compile_options(cuda_gl_demo_rl PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+  --use_fast_math
+>)

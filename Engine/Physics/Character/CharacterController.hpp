@@ -1,12 +1,14 @@
 #pragma once
 
 #include "../../Core/Base.hpp"
-#include "../../Graphics/RigidBody.hpp"
+#include "../RigidBody.hpp"
 #include "../Shapes/CapsuleShape.hpp"
 #include <glm/glm.hpp>
 
 namespace GameEngine {
 namespace Physics {
+
+    class PhysicsWorld;
 
     /**
      * @brief Character controller for player movement
@@ -70,6 +72,12 @@ namespace Physics {
          * @brief Get capsule shape
          */
         Ref<CapsuleShape> GetCapsuleShape() const { return m_CapsuleShape; }
+
+        /**
+         * @brief Set physics world for ground detection raycast (optional)
+         */
+        void SetPhysicsWorld(PhysicsWorld* world) { m_PhysicsWorld = world; }
+        PhysicsWorld* GetPhysicsWorld() const { return m_PhysicsWorld; }
         
     private:
         void DetectGround();
@@ -88,6 +96,8 @@ namespace Physics {
         
         glm::vec3 m_GroundNormal;
         bool m_OnSlope;
+
+        PhysicsWorld* m_PhysicsWorld = nullptr;
     };
 
 }}

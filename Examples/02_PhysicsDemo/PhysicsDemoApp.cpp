@@ -15,6 +15,7 @@
 #include <imgui.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <filesystem>
 
 PhysicsDemoApp::PhysicsDemoApp() : Application("Physics Demo") {
 }
@@ -25,46 +26,44 @@ void PhysicsDemoApp::OnInit() {
     m_Scene = CreateRef<Scene>("PhysicsDemoScene");
     GetSceneManager().SetActiveScene(m_Scene);
     
-    // Create basic shader
-    const char* vertexSrc = R"(
-        #version 450 core
-        layout(location = 0) in vec3 a_Position;
-        layout(location = 1) in vec3 a_Normal;
-        layout(location = 2) in vec2 a_TexCoord;
-        
-        uniform mat4 u_ViewProjection;
-        uniform mat4 u_Transform;
-        
-        out vec3 v_Normal;
-        out vec3 v_Position;
-        
-        void main() {
-            v_Position = vec3(u_Transform * vec4(a_Position, 1.0));
-            v_Normal = mat3(transpose(inverse(u_Transform))) * a_Normal;
-            gl_Position = u_ViewProjection * vec4(v_Position, 1.0);
-        }
-    )";
-    
-    const char* fragmentSrc = R"(
-        #version 450 core
-        layout(location = 0) out vec4 FragColor;
-        
-        in vec3 v_Normal;
-        in vec3 v_Position;
-        
-        uniform vec3 u_Color;
-        uniform vec3 u_LightDir;
-        uniform vec3 u_LightColor;
-        
-        void main() {
-            vec3 normal = normalize(v_Normal);
-            float diff = max(dot(normal, -u_LightDir), 0.2);
-            vec3 color = u_Color * diff * u_LightColor;
-            FragColor = vec4(color, 1.0);
-        }
-    )";
-    
-    m_BasicShader = CreateRef<Shader>("Basic", vertexSrc, fragmentSrc);
+    // Load basic shader from external files (with inline fallback)
+    std::string vertPath = "Assets/Shaders/basic.vert";
+    std::string fragPath = "Assets/Shaders/basic.frag";
+    if (std::filesystem::exists(vertPath) && std::filesystem::exists(fragPath)) {
+        m_BasicShader = CreateRef<Shader>(vertPath, fragPath);
+    } else {
+        const char* vertexSrc = R"(
+            #version 420 core
+            layout(location = 0) in vec3 a_Position;
+            layout(location = 1) in vec3 a_Normal;
+            layout(location = 2) in vec2 a_TexCoord;
+            uniform mat4 u_ViewProjection;
+            uniform mat4 u_Transform;
+            out vec3 v_Normal;
+            out vec3 v_Position;
+            void main() {
+                v_Position = vec3(u_Transform * vec4(a_Position, 1.0));
+                v_Normal = mat3(transpose(inverse(u_Transform))) * a_Normal;
+                gl_Position = u_ViewProjection * vec4(v_Position, 1.0);
+            }
+        )";
+        const char* fragmentSrc = R"(
+            #version 420 core
+            layout(location = 0) out vec4 FragColor;
+            in vec3 v_Normal;
+            in vec3 v_Position;
+            uniform vec3 u_Color;
+            uniform vec3 u_LightDir;
+            uniform vec3 u_LightColor;
+            void main() {
+                vec3 normal = normalize(v_Normal);
+                float diff = max(dot(normal, -u_LightDir), 0.2);
+                vec3 color = u_Color * diff * u_LightColor;
+                FragColor = vec4(color, 1.0);
+            }
+        )";
+        m_BasicShader = CreateRef<Shader>("Basic", vertexSrc, fragmentSrc);
+    }
     
     // Generate meshes
     m_CubeMesh = MeshGenerator3D::CreateCube(1.0f);

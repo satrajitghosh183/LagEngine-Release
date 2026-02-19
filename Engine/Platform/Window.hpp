@@ -74,6 +74,16 @@ namespace GameEngine {
          * @brief Check if VSync is enabled
          */
         virtual bool IsVSync() const = 0;
+
+        /**
+         * @brief Set fullscreen mode
+         */
+        virtual void SetFullscreen(bool fullscreen) = 0;
+
+        /**
+         * @brief Check if fullscreen
+         */
+        virtual bool IsFullscreen() const = 0;
         
         /**
          * @brief Get native window handle (platform-specific)

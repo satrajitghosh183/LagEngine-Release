@@ -1,6 +1,5 @@
 #include "ColliderComponent.hpp"
 #include "RigidBodyComponent.hpp"
-#include "../Entity.hpp"
 #include "../Scene.hpp"
 
 namespace GameEngine {
@@ -105,13 +104,31 @@ namespace GameEngine {
     }
 
     void ColliderComponent::OnCreate() {
-        // Register with physics world
-        // TODO: Add collider to physics world collision detection
+        // If there's a rigid body component, attach our collision shape to it
+        if (m_Shape && Owner && Owner->HasComponent<RigidBodyComponent>()) {
+            auto& rb = Owner->GetComponent<RigidBodyComponent>();
+            auto rigidBody = rb.GetRigidBody();
+            if (rigidBody) {
+                rigidBody->SetCollisionShape(m_Shape);
+                
+                // Update inertia tensor based on shape
+                if (rb.Type == RigidBodyComponent::BodyType::Dynamic) {
+                    glm::mat3 inertia = m_Shape->CalculateInertiaTensor(rb.Mass);
+                    rigidBody->SetInertiaTensor(inertia);
+                }
+            }
+        }
     }
 
     void ColliderComponent::OnDestroy() {
-        // Unregister from physics world
-        // TODO: Remove collider from physics world
+        // Remove collision shape from rigid body
+        if (Owner && Owner->HasComponent<RigidBodyComponent>()) {
+            auto& rb = Owner->GetComponent<RigidBodyComponent>();
+            auto rigidBody = rb.GetRigidBody();
+            if (rigidBody) {
+                rigidBody->SetCollisionShape(nullptr);
+            }
+        }
     }
 
     void ColliderComponent::SetShape(const Ref<Physics::CollisionShape>& shape) {

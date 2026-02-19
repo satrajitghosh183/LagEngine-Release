@@ -1,12 +1,14 @@
 #pragma once
 
 #include "../../Core/Base.hpp"
+#include "../../Core/UUID.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 
 namespace GameEngine {
 
     class Entity;
+    class Scene;
 
     /**
      * @brief Base component class
@@ -59,9 +61,15 @@ namespace GameEngine {
         bool Enabled = true;
         
         /**
-         * @brief Owner entity (set by scene)
+         * @brief Owner entity UUID and scene (set by scene). Use GetOwnerEntity() to get Entity.
          */
-        Entity* Owner = nullptr;
+        UUID OwnerUUID = 0;
+        Scene* OwnerScene = nullptr;
+        
+        /**
+         * @brief Get the owner entity. Returns invalid Entity if not set.
+         */
+        Entity GetOwnerEntity() const;
     };
 }
 

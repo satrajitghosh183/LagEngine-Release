@@ -1,0 +1,7 @@
+{
+    "name": "GPU Particle System",
+    "description": "Compute shader-driven particle system with 100K+ particles, gravity, floor collision, and configurable emission.",
+    "category": "Particles",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

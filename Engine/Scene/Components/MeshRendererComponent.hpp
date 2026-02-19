@@ -42,14 +42,22 @@ namespace GameEngine {
         Ref<Material> GetMaterial() const { return m_Material; }
         
         /**
+         * @brief Deferred asset path (set during deserialization for file-based meshes)
+         */
+        const std::string& GetMeshAssetPath() const { return m_MeshAssetPath; }
+        const std::string& GetShaderName() const { return m_ShaderName; }
+
+        /**
          * @brief Render settings
          */
         bool CastShadows = true;
         bool ReceiveShadows = true;
         int RenderLayer = 0;
-        
+
     private:
         Ref<Mesh3D> m_Mesh;
         Ref<Material> m_Material;
+        std::string m_MeshAssetPath;   // For deferred loading of file-based meshes
+        std::string m_ShaderName;      // For deferred shader assignment after load
     };
 }

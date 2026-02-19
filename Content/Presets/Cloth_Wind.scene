@@ -1,0 +1,76 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "Cloth Wind Simulation",
+    "uuid": "c1d2e3f4a5b60001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "c1d2e3f4a5b60010",
+            "name": "Cloth",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 3.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "ClothComponent",
+                    "Width": 3.0,
+                    "Height": 3.0,
+                    "Resolution": 20,
+                    "WindForce": [1.0, 0.0, 0.5]
+                }
+            ]
+        },
+        {
+            "uuid": "c1d2e3f4a5b60011",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 3.0, 6.0],
+                    "rotation": [-10.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 1000.0,
+                    "isPrimary": true
+                }
+            ]
+        },
+        {
+            "uuid": "c1d2e3f4a5b60012",
+            "name": "Directional Light",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 10.0, 0.0],
+                    "rotation": [-45.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Directional",
+                    "color": [1.0, 0.98, 0.95],
+                    "intensity": 1.0,
+                    "castShadows": true
+                }
+            ]
+        }
+    ]
+}

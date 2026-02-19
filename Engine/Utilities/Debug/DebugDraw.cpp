@@ -1,6 +1,13 @@
 #include "DebugDraw.hpp"
 #include "../../Core/Logger.hpp"
+#include "../../Core/Application.hpp"
+#include "../../Scene/SceneManager.hpp"
 #include "../../Graphics/RenderCommand.hpp"
+#include "../../Physics/PhysicsWorld.hpp"
+#include "../../Physics/Shapes/SphereShape.hpp"
+#include "../../Physics/Shapes/BoxShape.hpp"
+#include "../../Physics/Shapes/CapsuleShape.hpp"
+#include "../../Physics/Shapes/PlaneShape.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -8,6 +15,7 @@
 namespace GameEngine {
 
     std::vector<DebugDraw::DebugLine> DebugDraw::s_Lines;
+    std::mutex DebugDraw::s_LinesMutex;
     Ref<Shader> DebugDraw::s_Shader;
     uint32_t DebugDraw::s_VAO = 0;
     uint32_t DebugDraw::s_VBO = 0;
@@ -16,7 +24,7 @@ namespace GameEngine {
     void DebugDraw::Init() {
         // Create shader
         const char* vertexSrc = R"(
-            #version 450 core
+            #version 420 core
             layout(location = 0) in vec3 a_Position;
             layout(location = 1) in vec3 a_Color;
             
@@ -31,7 +39,7 @@ namespace GameEngine {
         )";
         
         const char* fragmentSrc = R"(
-            #version 450 core
+            #version 420 core
             layout(location = 0) out vec4 FragColor;
             
             in vec3 v_Color;
@@ -75,31 +83,48 @@ namespace GameEngine {
         }
         
         s_Shader.reset();
-        s_Lines.clear();
+        {
+            std::lock_guard<std::mutex> lock(s_LinesMutex);
+            s_Lines.clear();
+        }
     }
 
     void DebugDraw::Update(float deltaTime) {
-        // Remove expired lines
+        std::lock_guard<std::mutex> lock(s_LinesMutex);
+        // Remove expired lines (duration > 0 that have elapsed)
         s_Lines.erase(
             std::remove_if(s_Lines.begin(), s_Lines.end(), [deltaTime](DebugLine& line) {
                 if (line.RemainingTime > 0) {
                     line.RemainingTime -= deltaTime;
                     return line.RemainingTime <= 0;
                 }
-                return false;  // Permanent line
+                return false;  // Keep zero-duration (single-frame) and persistent lines
+            }),
+            s_Lines.end()
+        );
+        // Remove zero-duration (single-frame) lines after they would have been rendered this frame.
+        // Caller is responsible for calling Render() once per frame; Update() only expires lines.
+        s_Lines.erase(
+            std::remove_if(s_Lines.begin(), s_Lines.end(), [](const DebugLine& line) {
+                return line.RemainingTime == 0.0f;
             }),
             s_Lines.end()
         );
     }
 
     void DebugDraw::Render(const Camera3D& camera) {
-        if (s_Lines.empty()) return;
+        std::vector<DebugLine> linesCopy;
+        {
+            std::lock_guard<std::mutex> lock(s_LinesMutex);
+            if (s_Lines.empty()) return;
+            linesCopy = s_Lines;
+        }
         
         // Prepare vertex data
         std::vector<float> vertices;
-        vertices.reserve(s_Lines.size() * 12);  // 2 vertices * 6 floats per line
+        vertices.reserve(linesCopy.size() * 12);  // 2 vertices * 6 floats per line
         
-        for (const auto& line : s_Lines) {
+        for (const auto& line : linesCopy) {
             // Start vertex
             vertices.push_back(line.Start.x);
             vertices.push_back(line.Start.y);
@@ -132,7 +157,7 @@ namespace GameEngine {
         }
         
         glBindVertexArray(s_VAO);
-        glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(s_Lines.size() * 2));
+        glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(linesCopy.size() * 2));
         glBindVertexArray(0);
         
         // Restore state
@@ -143,7 +168,69 @@ namespace GameEngine {
         s_Shader->Unbind();
     }
 
+    void DebugDraw::Render(const glm::mat4& viewProjectionMatrix) {
+        if (!s_Shader || s_VAO == 0) return;
+
+        std::vector<DebugLine> linesCopy;
+        {
+            std::lock_guard<std::mutex> lock(s_LinesMutex);
+            if (s_Lines.empty()) return;
+            linesCopy = s_Lines;
+        }
+
+        std::vector<float> vertices;
+        vertices.reserve(linesCopy.size() * 12);
+
+        for (const auto& line : linesCopy) {
+            vertices.push_back(line.Start.x);
+            vertices.push_back(line.Start.y);
+            vertices.push_back(line.Start.z);
+            vertices.push_back(line.Color.r);
+            vertices.push_back(line.Color.g);
+            vertices.push_back(line.Color.b);
+
+            vertices.push_back(line.End.x);
+            vertices.push_back(line.End.y);
+            vertices.push_back(line.End.z);
+            vertices.push_back(line.Color.r);
+            vertices.push_back(line.Color.g);
+            vertices.push_back(line.Color.b);
+        }
+
+        glBindBuffer(GL_ARRAY_BUFFER, s_VBO);
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
+
+        s_Shader->Bind();
+        s_Shader->SetUniformMat4("u_ViewProjection", viewProjectionMatrix);
+
+        bool prevDepthTest = glIsEnabled(GL_DEPTH_TEST);
+        if (!s_DepthTest && prevDepthTest) {
+            glDisable(GL_DEPTH_TEST);
+        }
+
+        glBindVertexArray(s_VAO);
+        glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(linesCopy.size() * 2));
+        glBindVertexArray(0);
+
+        if (!s_DepthTest && prevDepthTest) {
+            glEnable(GL_DEPTH_TEST);
+        }
+
+        s_Shader->Unbind();
+    }
+
+    void DebugDraw::FlushSingleFrame() {
+        std::lock_guard<std::mutex> lock(s_LinesMutex);
+        s_Lines.erase(
+            std::remove_if(s_Lines.begin(), s_Lines.end(), [](const DebugLine& line) {
+                return line.RemainingTime == 0.0f;
+            }),
+            s_Lines.end()
+        );
+    }
+
     void DebugDraw::Clear() {
+        std::lock_guard<std::mutex> lock(s_LinesMutex);
         s_Lines.clear();
     }
 
@@ -153,6 +240,7 @@ namespace GameEngine {
 
     void DebugDraw::AddLine(const glm::vec3& start, const glm::vec3& end, 
                            const glm::vec3& color, float duration) {
+        std::lock_guard<std::mutex> lock(s_LinesMutex);
         s_Lines.push_back({ start, end, color, duration });
     }
 
@@ -326,4 +414,188 @@ namespace GameEngine {
         DrawLine(corners[2], corners[6], color, duration);
         DrawLine(corners[3], corners[7], color, duration);
     }
+
+    // ==================== Physics Debug Visualization ====================
+
+    void DebugDraw::DrawCollider(const Ref<Physics::CollisionShape>& shape,
+                                const glm::vec3& position,
+                                const glm::quat& rotation,
+                                const glm::vec3& color,
+                                float duration) {
+        if (!shape) return;
+        
+        switch (shape->GetType()) {
+            case Physics::CollisionShape::ShapeType::Sphere: {
+                auto sphere = std::static_pointer_cast<Physics::SphereShape>(shape);
+                DrawSphere(position, sphere->GetRadius(), color, duration);
+                break;
+            }
+            case Physics::CollisionShape::ShapeType::Box: {
+                auto box = std::static_pointer_cast<Physics::BoxShape>(shape);
+                DrawBox(position, box->GetHalfExtents() * 2.0f, rotation, color, duration);
+                break;
+            }
+            case Physics::CollisionShape::ShapeType::Capsule: {
+                auto capsule = std::static_pointer_cast<Physics::CapsuleShape>(shape);
+                DrawCapsule(position, capsule->GetRadius(), capsule->GetHeight(), rotation, color, duration);
+                break;
+            }
+            case Physics::CollisionShape::ShapeType::Plane: {
+                auto plane = std::static_pointer_cast<Physics::PlaneShape>(shape);
+                DrawPlane(rotation * plane->GetNormal(), plane->GetDistance(), 5.0f, color, duration);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    void DebugDraw::DrawContact(const glm::vec3& position,
+                               const glm::vec3& normal,
+                               float penetration,
+                               const glm::vec3& color,
+                               float duration) {
+        // Draw contact point marker
+        DrawCross(position, 0.1f, color, duration);
+        
+        // Draw normal arrow
+        DrawRay(position, normal * 0.5f, glm::vec3(1, 0, 0), duration);
+        
+        // Draw penetration indicator
+        DrawLine(position, position - normal * penetration, glm::vec3(1, 1, 0), duration);
+    }
+
+    void DebugDraw::DrawContactManifold(const Physics::ContactManifold& manifold, float duration) {
+        const auto& contacts = manifold.GetContacts();
+        
+        for (const auto& contact : contacts) {
+            // Draw contact position
+            glm::vec3 contactPos = (contact.PositionA + contact.PositionB) * 0.5f;
+            DrawContact(contactPos, contact.Normal, contact.Penetration, glm::vec3(1, 0, 0), duration);
+            
+            // Draw position on body A (green)
+            DrawCross(contact.PositionA, 0.05f, glm::vec3(0, 1, 0), duration);
+            
+            // Draw position on body B (blue)
+            DrawCross(contact.PositionB, 0.05f, glm::vec3(0, 0, 1), duration);
+        }
+    }
+
+    void DebugDraw::DrawConstraint(const Physics::Constraint* constraint,
+                                  const glm::vec3& color,
+                                  float duration) {
+        if (!constraint) return;
+        
+        Physics::RigidBody* bodyA = constraint->GetBodyA();
+        Physics::RigidBody* bodyB = constraint->GetBodyB();
+        
+        if (bodyA && bodyB) {
+            // Draw line between connected bodies
+            DrawLine(bodyA->GetPosition(), bodyB->GetPosition(), color, duration);
+            
+            // Draw markers at connection points
+            DrawCross(bodyA->GetPosition(), 0.15f, color, duration);
+            DrawCross(bodyB->GetPosition(), 0.15f, color, duration);
+        }
+    }
+
+    void DebugDraw::DrawPhysicsWorld(const Physics::PhysicsWorld* world,
+                                    bool drawColliders,
+                                    bool drawContacts,
+                                    bool drawConstraints,
+                                    float duration) {
+        if (!world) return;
+        
+        // Draw colliders
+        if (drawColliders) {
+            const auto& bodies = world->GetRigidBodies();
+            for (const auto& body : bodies) {
+                if (body->HasCollisionShape()) {
+                    glm::vec3 color;
+                    switch (body->GetBodyType()) {
+                        case Physics::RigidBody::BodyType::Static:
+                            color = glm::vec3(0.5f, 0.5f, 0.5f);  // Gray for static
+                            break;
+                        case Physics::RigidBody::BodyType::Kinematic:
+                            color = glm::vec3(0.0f, 0.8f, 0.8f);  // Cyan for kinematic
+                            break;
+                        case Physics::RigidBody::BodyType::Dynamic:
+                            color = body->IsAwake() ? 
+                                glm::vec3(0.0f, 1.0f, 0.0f) :  // Green for awake
+                                glm::vec3(0.3f, 0.3f, 0.6f);   // Blue for sleeping
+                            break;
+                    }
+                    
+                    DrawCollider(body->GetCollisionShape(), body->GetPosition(), 
+                                body->GetRotation(), color, duration);
+                }
+            }
+        }
+        
+        // Draw contacts
+        if (drawContacts) {
+            const auto& manifolds = world->GetContactManifolds();
+            for (const auto& manifold : manifolds) {
+                DrawContactManifold(manifold, duration);
+            }
+        }
+        
+        // Draw constraints
+        if (drawConstraints) {
+            const auto& constraints = world->GetConstraints();
+            for (const auto& constraint : constraints) {
+                if (constraint->Enabled) {
+                    DrawConstraint(constraint.get(), glm::vec3(1, 0.5f, 0), duration);
+                } else {
+                    DrawConstraint(constraint.get(), glm::vec3(0.5f, 0.5f, 0.5f), duration);
+                }
+            }
+        }
+    }
+
+    void DebugDraw::DrawAABB(const glm::vec3& min, const glm::vec3& max,
+                            const glm::vec3& color, float duration) {
+        glm::vec3 size = max - min;
+        glm::vec3 center = (min + max) * 0.5f;
+        DrawBox(center, size, glm::quat(1, 0, 0, 0), color, duration);
+    }
+
+    void DebugDraw::DrawPlane(const glm::vec3& normal, float distance,
+                             float size, const glm::vec3& color, float duration) {
+        // Calculate a point on the plane
+        glm::vec3 planePoint = normal * distance;
+        
+        // Calculate tangent vectors
+        glm::vec3 tangent1;
+        if (std::abs(normal.y) < 0.9f) {
+            tangent1 = glm::normalize(glm::cross(normal, glm::vec3(0, 1, 0)));
+        } else {
+            tangent1 = glm::normalize(glm::cross(normal, glm::vec3(1, 0, 0)));
+        }
+        glm::vec3 tangent2 = glm::normalize(glm::cross(normal, tangent1));
+        
+        float halfSize = size * 0.5f;
+        
+        // Draw a grid on the plane
+        int gridDiv = 5;
+        float step = size / gridDiv;
+        
+        for (int i = 0; i <= gridDiv; i++) {
+            float offset = -halfSize + i * step;
+            
+            // Lines along tangent1
+            glm::vec3 start1 = planePoint + tangent1 * offset - tangent2 * halfSize;
+            glm::vec3 end1 = planePoint + tangent1 * offset + tangent2 * halfSize;
+            DrawLine(start1, end1, color, duration);
+            
+            // Lines along tangent2
+            glm::vec3 start2 = planePoint - tangent1 * halfSize + tangent2 * offset;
+            glm::vec3 end2 = planePoint + tangent1 * halfSize + tangent2 * offset;
+            DrawLine(start2, end2, color, duration);
+        }
+        
+        // Draw normal arrow
+        DrawRay(planePoint, normal * 0.5f, glm::vec3(0, 1, 0), duration);
+    }
+
 }

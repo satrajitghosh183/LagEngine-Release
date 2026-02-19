@@ -1,8 +1,15 @@
 #include "Scene.hpp"
 #include "Components/TransformComponent.hpp"
+#include <stdexcept>
 #include "Components/MeshRendererComponent.hpp"
 #include "Components/RigidBodyComponent.hpp"
 #include "Components/CameraComponent.hpp"
+#include "Components/ColliderComponent.hpp"
+#include "Components/LightComponent.hpp"
+#include "Components/ClothComponent.hpp"
+#include "Components/JointComponent.hpp"
+#include "Components/FluidEmitterComponent.hpp"
+#include "Components/ScriptComponent.hpp"
 #include "../Core/Logger.hpp"
 #include "../Graphics/Renderer3D.hpp"
 
@@ -26,7 +33,6 @@ namespace GameEngine {
         for (auto& [uuid, entityData] : m_Entities) {
             for (auto& [type, component] : entityData.Components) {
                 component->OnDestroy();
-                delete component->Owner;
             }
         }
         
@@ -37,11 +43,23 @@ namespace GameEngine {
 
     void Scene::OnStart() {
         m_IsRunning = true;
+        
+        // Call OnCreate on all components to initialize them for runtime
+        for (auto& [uuid, entityData] : m_Entities) {
+            if (!entityData.Active) continue;
+            
+            for (auto& [type, component] : entityData.Components) {
+                if (component->Enabled) {
+                    component->OnCreate();
+                }
+            }
+        }
+        
         GE_CORE_INFO("Scene '{0}' started", m_Name);
     }
 
     void Scene::Update(float deltaTime) {
-        if (!m_IsRunning || m_IsPaused) return;
+        if (m_IsPaused) return;
         
         // Update all components
         for (auto& [uuid, entityData] : m_Entities) {
@@ -56,7 +74,7 @@ namespace GameEngine {
     }
 
     void Scene::FixedUpdate(float fixedDeltaTime) {
-        if (!m_IsRunning || m_IsPaused) return;
+        if (m_IsPaused) return;
         
         // Sync rigid bodies from transforms (before physics)
         for (auto& entity : GetEntitiesWith<TransformComponent, RigidBodyComponent>()) {
@@ -90,8 +108,6 @@ namespace GameEngine {
     }
 
     void Scene::Render() {
-        if (!m_IsRunning) return;
-        
         // Get main camera
         Camera3D* camera = GetMainCamera();
         if (!camera) {
@@ -127,6 +143,13 @@ namespace GameEngine {
     void Scene::OnStop() {
         if (!m_IsRunning) return;
         
+        // Call OnDestroy on all components to clean up runtime state
+        for (auto& [uuid, entityData] : m_Entities) {
+            for (auto& [type, component] : entityData.Components) {
+                component->OnDestroy();
+            }
+        }
+        
         m_IsRunning = false;
         GE_CORE_INFO("Scene '{0}' stopped", m_Name);
     }
@@ -140,15 +163,22 @@ namespace GameEngine {
         entityData.ID = uuid;
         entityData.Name = name;
         entityData.Active = true;
+
+        std::string key = name;
+        size_t suffix = 0;
+        while (m_NameIndex.find(key) != m_NameIndex.end()) {
+            key = name + "_" + std::to_string(++suffix);
+        }
+        entityData.Name = key;
+        m_NameIndex[key] = uuid;
         
         m_Entities[uuid] = std::move(entityData);
         
         Entity entity(uuid, this);
         
-        // All entities have a transform component by default
         entity.AddComponent<TransformComponent>();
         
-        GE_CORE_TRACE("Entity '{0}' created (UUID: {1})", name, uuid.ToString());
+        GE_CORE_TRACE("Entity '{0}' created (UUID: {1})", key, uuid.ToString());
         
         return entity;
     }
@@ -183,12 +213,10 @@ namespace GameEngine {
     void Scene::DestroyEntityInternal(UUID uuid) {
         auto it = m_Entities.find(uuid);
         if (it != m_Entities.end()) {
-            // Call OnDestroy for all components
+            m_NameIndex.erase(it->second.Name);
             for (auto& [type, component] : it->second.Components) {
                 component->OnDestroy();
-                delete component->Owner;
             }
-            
             GE_CORE_TRACE("Entity '{0}' destroyed", it->second.Name);
             m_Entities.erase(it);
         }
@@ -202,10 +230,9 @@ namespace GameEngine {
     }
 
     Entity Scene::GetEntityByName(const std::string& name) {
-        for (auto& [uuid, entityData] : m_Entities) {
-            if (entityData.Name == name) {
-                return Entity(uuid, this);
-            }
+        auto it = m_NameIndex.find(name);
+        if (it != m_NameIndex.end()) {
+            return Entity(it->second, this);
         }
         return Entity();
     }
@@ -260,6 +287,140 @@ namespace GameEngine {
         return nullptr;
     }
 
+    void Scene::Merge(const Ref<Scene>& other, const std::string& prefix) {
+        if (!other) {
+            GE_CORE_WARN("Scene::Merge: Attempted to merge null scene");
+            return;
+        }
+
+        // UUID mapping for hierarchy preservation
+        std::unordered_map<UUID, UUID> uuidMap;
+
+        // First pass: Create all entities with new UUIDs
+        for (const auto& [oldUUID, oldEntityData] : other->m_Entities) {
+            // Generate new UUID (always generate new to avoid collisions)
+            UUID newUUID = UUID();
+            
+            // Check for collision and regenerate if needed
+            while (m_Entities.find(newUUID) != m_Entities.end()) {
+                newUUID = UUID();
+            }
+
+            uuidMap[oldUUID] = newUUID;
+
+            // Create new entity
+            std::string entityName = prefix.empty() ? oldEntityData.Name : prefix + "_" + oldEntityData.Name;
+            Entity newEntity = CreateEntityWithUUID(newUUID, entityName);
+            
+            // Set properties
+            if (!oldEntityData.Tag.empty()) {
+                newEntity.SetTag(oldEntityData.Tag);
+            }
+            newEntity.SetActive(oldEntityData.Active);
+        }
+
+        // Second pass: Copy components and hierarchy
+        for (const auto& [oldUUID, oldEntityData] : other->m_Entities) {
+            UUID newUUID = uuidMap[oldUUID];
+            Entity newEntity = GetEntityByUUID(newUUID);
+            
+            if (!newEntity.IsValid()) {
+                GE_CORE_WARN("Scene::Merge: Failed to find entity with UUID {}", newUUID.ToString());
+                continue;
+            }
+
+            // Copy components using serialization/deserialization
+            for (const auto& [typeIndex, oldComponent] : oldEntityData.Components) {
+                nlohmann::json componentData = oldComponent->Serialize();
+                
+                if (!componentData.contains("type")) {
+                    GE_CORE_WARN("Scene::Merge: Component missing type field");
+                    continue;
+                }
+                
+                std::string type = componentData["type"];
+                
+                // Clone component based on type
+                if (type == "TransformComponent") {
+                    // Transform is already added, just deserialize
+                    if (newEntity.HasComponent<TransformComponent>()) {
+                        newEntity.GetComponent<TransformComponent>().Deserialize(componentData);
+                    }
+                }
+                else if (type == "MeshRendererComponent") {
+                    auto& comp = newEntity.AddComponent<MeshRendererComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "RigidBodyComponent") {
+                    auto& comp = newEntity.AddComponent<RigidBodyComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "CameraComponent") {
+                    auto& comp = newEntity.AddComponent<CameraComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "ColliderComponent") {
+                    auto& comp = newEntity.AddComponent<ColliderComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "LightComponent") {
+                    auto& comp = newEntity.AddComponent<LightComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "ClothComponent") {
+                    auto& comp = newEntity.AddComponent<ClothComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "JointComponent") {
+                    auto& comp = newEntity.AddComponent<JointComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "FluidEmitterComponent") {
+                    auto& comp = newEntity.AddComponent<FluidEmitterComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else if (type == "ScriptComponent") {
+                    auto& comp = newEntity.AddComponent<ScriptComponent>();
+                    comp.Deserialize(componentData);
+                }
+                else {
+                    GE_CORE_WARN("Scene::Merge: Unknown component type: {}", type);
+                }
+            }
+
+            // Copy hierarchy (parent will be set in third pass)
+            auto& newEntityData = GetEntityData(newUUID);
+            if (oldEntityData.Parent != UUID(0)) {
+                // Map parent UUID
+                if (uuidMap.find(oldEntityData.Parent) != uuidMap.end()) {
+                    newEntityData.Parent = uuidMap[oldEntityData.Parent];
+                }
+            }
+            
+            // Map children UUIDs
+            for (const auto& oldChildUUID : oldEntityData.Children) {
+                if (uuidMap.find(oldChildUUID) != uuidMap.end()) {
+                    newEntityData.Children.push_back(uuidMap[oldChildUUID]);
+                }
+            }
+        }
+
+        // Third pass: Update entity hierarchy relationships
+        for (const auto& [uuid, entityData] : m_Entities) {
+            Entity entity = GetEntityByUUID(uuid);
+            if (!entity.IsValid()) continue;
+            
+            if (entityData.Parent != UUID(0)) {
+                Entity parentEntity = GetEntityByUUID(entityData.Parent);
+                if (parentEntity.IsValid()) {
+                    entity.SetParent(parentEntity);
+                }
+            }
+        }
+
+        GE_CORE_INFO("Scene '{0}' merged into '{1}' ({2} entities)", other->GetName(), m_Name, uuidMap.size());
+    }
+
     void Scene::SetMainCamera(Entity entity) {
         if (!entity.IsValid() || !entity.HasComponent<CameraComponent>()) {
             GE_CORE_WARN("Attempted to set main camera to invalid entity or entity without CameraComponent");
@@ -279,9 +440,28 @@ namespace GameEngine {
         entity.GetComponent<CameraComponent>().IsMainCamera = true;
     }
 
+    void Scene::UpdateEntityNameIndex(UUID uuid, const std::string& newName) {
+        auto it = m_Entities.find(uuid);
+        if (it == m_Entities.end()) return;
+        std::string& currentName = it->second.Name;
+        if (currentName == newName) return;
+        m_NameIndex.erase(currentName);
+        currentName = newName;
+        size_t suffix = 0;
+        std::string key = newName;
+        while (m_NameIndex.find(key) != m_NameIndex.end() && m_NameIndex[key] != uuid) {
+            key = newName + "_" + std::to_string(++suffix);
+        }
+        it->second.Name = key;
+        m_NameIndex[key] = uuid;
+    }
+
     Scene::EntityData& Scene::GetEntityData(UUID uuid) {
         auto it = m_Entities.find(uuid);
-        GE_CORE_ASSERT(it != m_Entities.end(), "Entity not found!");
+        if (it == m_Entities.end()) {
+            GE_CORE_ERROR("Entity not found: {0}", uuid.ToString());
+            throw std::runtime_error("Entity not found: " + uuid.ToString());
+        }
         return it->second;
     }
 

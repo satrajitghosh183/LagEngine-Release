@@ -1,0 +1,235 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "Basic Physics Stack",
+    "uuid": "b2c3d4e5f6a70001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "b2c3d4e5f6a70010",
+            "name": "Ground Plane",
+            "tag": "Ground",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, -0.5, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [20.0, 1.0, 20.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Cube",
+                    "material": {
+                        "albedo": [0.6, 0.6, 0.6, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.9,
+                        "ao": 1.0
+                    }
+                },
+                {
+                    "type": "ColliderComponent",
+                    "shape": "Box",
+                    "halfExtents": [10.0, 0.5, 10.0]
+                },
+                {
+                    "type": "RigidBodyComponent",
+                    "mass": 0.0,
+                    "isStatic": true,
+                    "friction": 0.5,
+                    "restitution": 0.3
+                }
+            ]
+        },
+        {
+            "uuid": "b2c3d4e5f6a70011",
+            "name": "Box 1",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 1.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Cube",
+                    "material": {
+                        "albedo": [0.8, 0.2, 0.2, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.5,
+                        "ao": 1.0
+                    }
+                },
+                {
+                    "type": "ColliderComponent",
+                    "shape": "Box",
+                    "halfExtents": [0.5, 0.5, 0.5]
+                },
+                {
+                    "type": "RigidBodyComponent",
+                    "mass": 1.0,
+                    "isStatic": false,
+                    "friction": 0.5,
+                    "restitution": 0.3
+                }
+            ]
+        },
+        {
+            "uuid": "b2c3d4e5f6a70012",
+            "name": "Box 2",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 2.5, 0.0],
+                    "rotation": [0.0, 15.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Cube",
+                    "material": {
+                        "albedo": [0.2, 0.8, 0.2, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.5,
+                        "ao": 1.0
+                    }
+                },
+                {
+                    "type": "ColliderComponent",
+                    "shape": "Box",
+                    "halfExtents": [0.5, 0.5, 0.5]
+                },
+                {
+                    "type": "RigidBodyComponent",
+                    "mass": 1.0,
+                    "isStatic": false,
+                    "friction": 0.5,
+                    "restitution": 0.3
+                }
+            ]
+        },
+        {
+            "uuid": "b2c3d4e5f6a70013",
+            "name": "Box 3",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 4.0, 0.0],
+                    "rotation": [0.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Cube",
+                    "material": {
+                        "albedo": [0.2, 0.2, 0.8, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.5,
+                        "ao": 1.0
+                    }
+                },
+                {
+                    "type": "ColliderComponent",
+                    "shape": "Box",
+                    "halfExtents": [0.5, 0.5, 0.5]
+                },
+                {
+                    "type": "RigidBodyComponent",
+                    "mass": 1.0,
+                    "isStatic": false,
+                    "friction": 0.5,
+                    "restitution": 0.3
+                }
+            ]
+        },
+        {
+            "uuid": "b2c3d4e5f6a70014",
+            "name": "Sphere",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [3.0, 3.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "MeshRendererComponent",
+                    "mesh": "Sphere",
+                    "material": {
+                        "albedo": [0.9, 0.8, 0.1, 1.0],
+                        "metallic": 0.3,
+                        "roughness": 0.4,
+                        "ao": 1.0
+                    }
+                },
+                {
+                    "type": "ColliderComponent",
+                    "shape": "Sphere",
+                    "radius": 0.5
+                },
+                {
+                    "type": "RigidBodyComponent",
+                    "mass": 2.0,
+                    "isStatic": false,
+                    "friction": 0.3,
+                    "restitution": 0.7
+                }
+            ]
+        },
+        {
+            "uuid": "b2c3d4e5f6a70015",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [5.0, 4.0, 8.0],
+                    "rotation": [-20.0, -20.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 1000.0,
+                    "isPrimary": true
+                }
+            ]
+        },
+        {
+            "uuid": "b2c3d4e5f6a70016",
+            "name": "Directional Light",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 10.0, 5.0],
+                    "rotation": [-45.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Directional",
+                    "color": [1.0, 1.0, 1.0],
+                    "intensity": 1.0,
+                    "castShadows": true
+                }
+            ]
+        }
+    ]
+}

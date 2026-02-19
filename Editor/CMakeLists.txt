@@ -26,9 +26,15 @@ target_link_libraries(GameEngineEditor
     PRIVATE
         GameEngine
         imgui
+        nlohmann_json::nlohmann_json
 )
 
 # Set output directory
 set_target_properties(GameEngineEditor PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# Install editor executable
+install(TARGETS GameEngineEditor
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

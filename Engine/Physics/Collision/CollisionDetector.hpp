@@ -42,11 +42,42 @@ namespace Physics {
                                const PlaneShape* plane, const glm::vec3& posP, const glm::quat& rotP,
                                ContactManifold& manifold);
         
+        static bool SphereCapsule(const SphereShape* sphere, const glm::vec3& posS,
+                                 const CapsuleShape* capsule, const glm::vec3& posC, const glm::quat& rotC,
+                                 ContactManifold& manifold);
+
         // Box vs X
         static bool BoxBox(const BoxShape* a, const glm::vec3& posA, const glm::quat& rotA,
                           const BoxShape* b, const glm::vec3& posB, const glm::quat& rotB,
                           ContactManifold& manifold);
-        
+
+        static bool BoxPlane(const BoxShape* box, const glm::vec3& posB, const glm::quat& rotB,
+                            const PlaneShape* plane, const glm::vec3& posP, const glm::quat& rotP,
+                            ContactManifold& manifold);
+
+        // Capsule vs X
+        static bool CapsuleCapsule(const CapsuleShape* a, const glm::vec3& posA, const glm::quat& rotA,
+                                  const CapsuleShape* b, const glm::vec3& posB, const glm::quat& rotB,
+                                  ContactManifold& manifold);
+
+        static bool CapsuleBox(const CapsuleShape* capsule, const glm::vec3& posC, const glm::quat& rotC,
+                              const BoxShape* box, const glm::vec3& posB, const glm::quat& rotB,
+                              ContactManifold& manifold);
+
+        static bool CapsulePlane(const CapsuleShape* capsule, const glm::vec3& posC, const glm::quat& rotC,
+                                const PlaneShape* plane, const glm::vec3& posP, const glm::quat& rotP,
+                                ContactManifold& manifold);
+
+        // Helper: closest point between two line segments
+        static void ClosestPointsOnSegments(
+            const glm::vec3& p1, const glm::vec3& q1,
+            const glm::vec3& p2, const glm::vec3& q2,
+            glm::vec3& closestA, glm::vec3& closestB);
+
+        // Helper: closest point on segment to a point
+        static glm::vec3 ClosestPointOnSegment(const glm::vec3& point,
+                                               const glm::vec3& segA, const glm::vec3& segB);
+
         // Helper: SAT (Separating Axis Theorem) test
         static bool SATTest(const BoxShape* a, const glm::vec3& posA, const glm::quat& rotA,
                            const BoxShape* b, const glm::vec3& posB, const glm::quat& rotB,

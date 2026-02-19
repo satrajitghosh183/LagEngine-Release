@@ -1,0 +1,82 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "Robot Arm 6-DOF",
+    "uuid": "b1c2d3e4f5a60001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "b1c2d3e4f5a60010",
+            "name": "Robot Arm",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "RobotArmComponent",
+                    "DHParameters": [
+                        { "a": 0.0, "alpha": 1.5708, "d": 0.4, "theta": 0.0 },
+                        { "a": 0.5, "alpha": 0.0, "d": 0.0, "theta": 0.0 },
+                        { "a": 0.0, "alpha": 1.5708, "d": 0.0, "theta": 0.0 },
+                        { "a": 0.0, "alpha": -1.5708, "d": 0.4, "theta": 0.0 },
+                        { "a": 0.0, "alpha": 1.5708, "d": 0.0, "theta": 0.0 },
+                        { "a": 0.0, "alpha": 0.0, "d": 0.1, "theta": 0.0 }
+                    ],
+                    "IKEnabled": true,
+                    "TargetPosition": [0.5, 0.5, 0.0]
+                }
+            ]
+        },
+        {
+            "uuid": "b1c2d3e4f5a60011",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [2.0, 2.0, 3.0],
+                    "rotation": [-25.0, -30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 1000.0,
+                    "isPrimary": true
+                }
+            ]
+        },
+        {
+            "uuid": "b1c2d3e4f5a60012",
+            "name": "Directional Light",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 10.0, 5.0],
+                    "rotation": [-45.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Directional",
+                    "color": [1.0, 1.0, 1.0],
+                    "intensity": 1.0,
+                    "castShadows": true
+                }
+            ]
+        }
+    ]
+}

@@ -1,100 +1,65 @@
-# 🚀 Getting Started with GameEngine
+# Getting Started with GameEngine
 
-## Installation
+This guide walks you from zero to a running scene in under 30 minutes.
 
-### Windows
+## Download and Install
 
-1. Download `GameEngine-1.0.0-win64.exe` from [Releases](releases)
-2. Run the installer
-3. Add to PATH: `C:\Program Files\GameEngine\bin`
+### Option 1: Pre-built release (recommended)
 
-### Linux (Ubuntu/Debian)
+1. Go to the [Releases](https://github.com/your-org/GameEngine/releases) page.
+2. Download the installer or ZIP for your platform:
+   - **Windows:** `GameEngine-x.x.x-Windows.exe` (NSIS installer) or `.zip` for portable.
+   - **macOS:** `GameEngine-x.x.x-macOS.dmg` or `.zip`.
+   - **Linux:** `gameengine_x.x.x_amd64.deb`, `.rpm`, or `.tar.gz`.
+3. Run the installer or extract the ZIP. The Editor executable is in the `bin/` folder (e.g. `bin/GameEngineEditor` or `GameEngineEditor.exe`).
+4. Double-click the Editor to launch.
+
+### Option 2: Build from source
+
+See the root [README.md](../../README.md) for prerequisites (CMake, compiler, OpenAL, etc.).
+
 ```bash
-wget https://github.com/yourusername/GameEngine/releases/download/v1.0.0/GameEngine-1.0.0-linux.deb
-sudo dpkg -i GameEngine-1.0.0-linux.deb
-```
+# Clone (with submodules)
+git clone --recursive https://github.com/your-org/GameEngine.git
+cd GameEngine
 
-### macOS
-```bash
-brew tap yourusername/gameengine
-brew install gameengine
-```
-
-## Creating Your First Project
-
-### Method 1: Using Project Generator (Recommended)
-```bash
-python -m gameengine create MyFirstGame
-cd MyFirstGame
-```
-
-### Method 2: Manual Setup
-
-1. **Create project structure:**
-```
-MyFirstGame/
-├── CMakeLists.txt
-├── Source/
-│   └── main.cpp
-└── Assets/
-    ├── Textures/
-    ├── Meshes/
-    └── Shaders/
-```
-
-2. **CMakeLists.txt:**
-```cmake
-cmake_minimum_required(VERSION 3.20)
-project(MyFirstGame)
-
-find_package(GameEngine REQUIRED)
-
-add_executable(MyFirstGame Source/main.cpp)
-target_link_libraries(MyFirstGame PRIVATE GameEngine::GameEngine)
-```
-
-3. **Source/main.cpp:**
-```cpp
-#include <GameEngine/Core/Application.hpp>
-
-class MyGame : public GameEngine::Application {
-public:
-    MyGame() : Application("My First Game") {}
-    
-    void OnInit() override {
-        GE_INFO("Game started!");
-    }
-    
-    void OnUpdate(float deltaTime) override {
-        // Game logic here
-    }
-    
-    void OnRender() override {
-        // Rendering here
-    }
-};
-
-GameEngine::Application* GameEngine::CreateApplication() {
-    return new MyGame();
-}
-```
-
-## Building
-```bash
+# Configure and build
 mkdir build && cd build
-cmake ..
-cmake --build .
+cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EDITOR=ON -DBUILD_EXAMPLES=ON
+cmake --build . -j
 ```
 
-## Running
-```bash
-./bin/MyFirstGame  # Linux/Mac
-.\bin\MyFirstGame.exe  # Windows
-```
+Run the Editor from `build/bin/GameEngineEditor` (or `GameEngineEditor.exe` on Windows).
+
+## First Launch
+
+When you open the Editor you should see:
+
+- **Left:** Scene Hierarchy (list of entities in the current scene).
+- **Center:** Viewport (3D view) and optionally Asset Browser / Console below.
+- **Right:** Components (properties of the selected entity).
+- **Top:** Menu bar (File, Edit, Entity, View, Window, Help) and a toolbar with Play / Pause / Stop.
+
+If you have no scene open, you start with one empty “Untitled Scene” tab.
+
+## Your First Scene
+
+1. **Add an entity:** In the Scene Hierarchy, click the “+” or use **Entity → Create Empty**. Name it e.g. “Cube”.
+2. **Add a mesh:** With the entity selected, in the Components panel click **+ Add Component → Mesh Renderer**. In the Mesh section click **Select Mesh…** and pick a built-in mesh (e.g. from your Assets) or the engine will use a default if available.
+3. **Add a camera:** **Entity → Camera** (or Create Empty and add a Camera component). In the Camera component, check **Main Camera** so the viewport uses it.
+4. **Position the camera:** Select the camera entity, then in the Transform component set Position to something like `(0, 2, 5)` so you can see the cube.
+5. **Press Play** in the toolbar. The scene runs in play mode; press Stop to return to editing.
+
+You can save the scene with **File → Save Scene** (or Save As) to a `.scene` file.
 
 ## Next Steps
 
-- 📖 Follow the [tutorials](Tutorials/)
-- 🎓 Check out [examples](../../Examples/)
-- 📘 Read the [API documentation](../API/)
-- 💬 Join our [Discord](https://discord.gg/yourserver)
+- **Editor features:** See [EditorGuide.md](EditorGuide.md) for panels, hotkeys, and workflows.
+- **Scripting:** See [ScriptingAPI.md](ScriptingAPI.md) for Lua scripting and the scripting console.
+- **Tutorials:** See [../Tutorials/](../Tutorials/) for step-by-step tutorials (First Scene, Physics, Lua, Shaders, Cloth).
+
+## Troubleshooting
+
+- **Black viewport:** Ensure a camera exists and is set as Main Camera, and that it looks at your content (check Transform and FOV).
+- **Missing shaders:** If you built from source, run the Editor from the `build` directory or copy `Assets/Shaders` next to the executable so the engine can find them.
+- **Crashes on startup:** Update GPU drivers; on Linux install `libgl1-mesa-dev` and related packages (see README).

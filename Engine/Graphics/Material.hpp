@@ -29,6 +29,7 @@ namespace GameEngine {
      */
     class Material {
     public:
+        Material();
         Material(const Ref<Shader>& shader);
         ~Material() = default;
         
@@ -53,12 +54,51 @@ namespace GameEngine {
         void SetShader(const Ref<Shader>& shader) { m_Shader = shader; }
         
         /**
+         * @brief Material name
+         */
+        const std::string& GetName() const { return m_Name; }
+        void SetName(const std::string& name) { m_Name = name; }
+        
+        /**
          * @brief Set texture
          */
         void SetTexture(const std::string& name, const Ref<Texture2D>& texture, uint32_t slot = 0);
         
         /**
-         * @brief Set material properties
+         * @brief PBR material properties
+         */
+        void SetAlbedo(const glm::vec3& color) { m_Albedo = color; }
+        glm::vec3 GetAlbedo() const { return m_Albedo; }
+        
+        void SetMetallic(float value) { m_Metallic = value; }
+        float GetMetallic() const { return m_Metallic; }
+        
+        void SetRoughness(float value) { m_Roughness = value; }
+        float GetRoughness() const { return m_Roughness; }
+        
+        void SetAO(float value) { m_AO = value; }
+        float GetAO() const { return m_AO; }
+        
+        /**
+         * @brief PBR texture maps
+         */
+        void SetAlbedoMap(const Ref<Texture2D>& texture) { m_AlbedoMap = texture; }
+        Ref<Texture2D> GetAlbedoMap() const { return m_AlbedoMap; }
+        
+        void SetNormalMap(const Ref<Texture2D>& texture) { m_NormalMap = texture; }
+        Ref<Texture2D> GetNormalMap() const { return m_NormalMap; }
+        
+        void SetMetallicMap(const Ref<Texture2D>& texture) { m_MetallicMap = texture; }
+        Ref<Texture2D> GetMetallicMap() const { return m_MetallicMap; }
+        
+        void SetRoughnessMap(const Ref<Texture2D>& texture) { m_RoughnessMap = texture; }
+        Ref<Texture2D> GetRoughnessMap() const { return m_RoughnessMap; }
+        
+        void SetAOMap(const Ref<Texture2D>& texture) { m_AOMap = texture; }
+        Ref<Texture2D> GetAOMap() const { return m_AOMap; }
+        
+        /**
+         * @brief Set material properties (generic)
          */
         void SetInt(const std::string& name, int value);
         void SetFloat(const std::string& name, float value);
@@ -76,7 +116,21 @@ namespace GameEngine {
         glm::vec4 GetVec4(const std::string& name) const;
         
     private:
+        std::string m_Name = "Material";
         Ref<Shader> m_Shader;
+        
+        // PBR properties
+        glm::vec3 m_Albedo = glm::vec3(1.0f);
+        float m_Metallic = 0.0f;
+        float m_Roughness = 0.5f;
+        float m_AO = 1.0f;
+        
+        // PBR texture maps
+        Ref<Texture2D> m_AlbedoMap;
+        Ref<Texture2D> m_NormalMap;
+        Ref<Texture2D> m_MetallicMap;
+        Ref<Texture2D> m_RoughnessMap;
+        Ref<Texture2D> m_AOMap;
         
         struct TextureSlot {
             Ref<Texture2D> Texture;

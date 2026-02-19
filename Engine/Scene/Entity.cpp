@@ -1,10 +1,15 @@
 #include "Entity.hpp"
 #include "Scene.hpp"
+#include "../Core/Logger.hpp"
 
 namespace GameEngine {
 
     Entity::Entity(UUID id, Scene* scene)
         : m_UUID(id), m_Scene(scene) {
+    }
+
+    bool Entity::IsValid() const {
+        return m_Scene != nullptr && m_UUID != UUID(0) && m_Scene->HasEntity(m_UUID);
     }
 
     const std::string& Entity::GetName() const {
@@ -17,7 +22,7 @@ namespace GameEngine {
 
     void Entity::SetName(const std::string& name) {
         if (IsValid()) {
-            m_Scene->GetEntityData(m_UUID).Name = name;
+            m_Scene->UpdateEntityNameIndex(m_UUID, name);
         }
     }
 
@@ -47,11 +52,33 @@ namespace GameEngine {
     }
 
     void Entity::SetParent(Entity parent) {
-        if (!IsValid() || !parent.IsValid()) return;
-        
+        if (!IsValid()) return;
         auto& entityData = m_Scene->GetEntityData(m_UUID);
+
+        if (!parent.IsValid()) {
+            // Clear parent
+            if (entityData.Parent != UUID(0)) {
+                auto& oldParentData = m_Scene->GetEntityData(entityData.Parent);
+                auto it = std::find(oldParentData.Children.begin(), oldParentData.Children.end(), m_UUID);
+                if (it != oldParentData.Children.end()) oldParentData.Children.erase(it);
+            }
+            entityData.Parent = UUID(0);
+            return;
+        }
+        if (parent.GetUUID() == m_UUID) return; // self-parent is no-op
+
+        // Cycle detection: if proposed parent is a descendant of this, we would create a cycle
+        Entity ancestor = parent;
+        while (ancestor.IsValid()) {
+            if (ancestor.GetUUID() == m_UUID) {
+                GE_CORE_WARN("Entity::SetParent: Would create cycle in hierarchy (parent is descendant of this entity). Ignored.");
+                return;
+            }
+            ancestor = ancestor.GetParent();
+        }
+
         auto& parentData = m_Scene->GetEntityData(parent.GetUUID());
-        
+
         // Remove from old parent
         if (entityData.Parent != UUID(0)) {
             auto& oldParentData = m_Scene->GetEntityData(entityData.Parent);
@@ -99,21 +126,18 @@ namespace GameEngine {
         }
     }
 
-    const std::vector<Entity>& Entity::GetChildren() const {
-        static std::vector<Entity> empty;
-        
-        if (!IsValid()) return empty;
-        
+    std::vector<Entity> Entity::GetChildren() const {
+        if (!IsValid()) return {};
+
         auto& entityData = m_Scene->GetEntityData(m_UUID);
-        
-        // Convert UUIDs to entities
-        static std::vector<Entity> children;
-        children.clear();
-        
+
+        std::vector<Entity> children;
+        children.reserve(entityData.Children.size());
+
         for (UUID childID : entityData.Children) {
             children.emplace_back(childID, m_Scene);
         }
-        
+
         return children;
     }
 

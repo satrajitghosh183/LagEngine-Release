@@ -1,4 +1,5 @@
 #include "../../Engine/Core/Application.hpp"
+#include "../../Engine/Core/Logger.hpp"
 #include "../../Engine/Graphics/Shader.hpp"
 #include "../../Engine/Graphics/VertexArray.hpp"
 #include "../../Engine/Graphics/RenderCommand.hpp"
@@ -17,7 +18,7 @@ protected:
         
         // Create shader
         const char* vertexSrc = R"(
-            #version 450 core
+            #version 420 core
             layout(location = 0) in vec3 a_Position;
             layout(location = 1) in vec3 a_Color;
             
@@ -30,7 +31,7 @@ protected:
         )";
         
         const char* fragmentSrc = R"(
-            #version 450 core
+            #version 420 core
             layout(location = 0) out vec4 FragColor;
             
             in vec3 v_Color;
@@ -40,8 +41,10 @@ protected:
             }
         )";
         
+        GE_INFO("Creating shader...");
         m_Shader = CreateRef<Shader>("Triangle", vertexSrc, fragmentSrc);
-        
+        GE_INFO("Shader created, creating vertex array...");
+
         // Create triangle
         float vertices[] = {
             // Position         // Color

@@ -40,6 +40,7 @@ namespace Physics {
         RigidBody* m_BodyB;
         glm::vec3 m_Axis;
         float m_AccumulatedImpulse;
+        float m_DeltaTime = 0.016f;
     };
 
 }}

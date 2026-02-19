@@ -1,4 +1,5 @@
 #include "Logger.hpp"
+#include <ctime>
 
 namespace GameEngine {
 
@@ -7,6 +8,7 @@ namespace GameEngine {
     bool Logger::s_ConsoleOutput = true;
     bool Logger::s_FileOutput = true;
     std::mutex Logger::s_Mutex;
+    std::vector<Logger::LogCallback> Logger::s_Callbacks;
 
     void Logger::Init(const std::string& logFilePath, LogLevel minLevel) {
         s_MinLevel = minLevel;
@@ -26,6 +28,34 @@ namespace GameEngine {
         if (s_LogFile.is_open()) {
             GE_CORE_INFO("Logger shutting down");
             s_LogFile.close();
+        }
+        {
+            std::lock_guard<std::mutex> lock(s_Mutex);
+            s_Callbacks.clear();
+        }
+    }
+    
+    void Logger::AddCallback(LogCallback callback) {
+        std::lock_guard<std::mutex> lock(s_Mutex);
+        s_Callbacks.push_back(callback);
+    }
+    
+    void Logger::ClearCallbacks() {
+        std::lock_guard<std::mutex> lock(s_Mutex);
+        s_Callbacks.clear();
+    }
+    
+    void Logger::NotifyCallbacks(LogLevel level, const std::string& message, const std::string& timestamp,
+                                 const std::vector<LogCallback>& callbacks) {
+        LogEntry entry;
+        entry.level = level;
+        entry.message = message;
+        entry.timestamp = timestamp;
+        
+        for (auto& callback : callbacks) {
+            if (callback) {
+                callback(entry);
+            }
         }
     }
 
@@ -51,8 +81,15 @@ namespace GameEngine {
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now.time_since_epoch()) % 1000;
         
+        std::tm tm_result;
+#ifdef _WIN32
+        localtime_s(&tm_result, &time);
+#else
+        localtime_r(&time, &tm_result);
+#endif
+        
         std::ostringstream oss;
-        oss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S");
+        oss << std::put_time(&tm_result, "%Y-%m-%d %H:%M:%S");
         oss << '.' << std::setfill('0') << std::setw(3) << ms.count();
         return oss.str();
     }

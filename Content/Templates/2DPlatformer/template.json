@@ -1,0 +1,7 @@
+{
+    "name": "2D Platformer",
+    "description": "2D sprite rendering with batch renderer, sprite animation, and atlas support.",
+    "category": "2D",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

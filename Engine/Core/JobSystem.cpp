@@ -2,6 +2,7 @@
 #include "Logger.hpp"
 #include <random>
 #include <climits>
+#include <unordered_set>
 
 namespace GameEngine {
 
@@ -14,12 +15,40 @@ namespace GameEngine {
     thread_local JobSystem::JobQueue* JobSystem::s_LocalQueue = nullptr;
     thread_local uint32_t JobSystem::s_WorkerId = UINT32_MAX;
     bool JobSystem::s_Initialized = false;
+    
+    // Initialization barrier members
+    std::atomic<bool> JobSystem::s_WorkersReady(false);
+    std::mutex JobSystem::s_InitMutex;
+    std::condition_variable JobSystem::s_InitCV;
+
+    // Job completion tracking
+    std::unordered_set<uint64_t> JobSystem::s_CompletedJobs;
+    std::deque<uint64_t> JobSystem::s_CompletedJobOrder;
+    std::mutex JobSystem::s_CompletionMutex;
+    std::condition_variable JobSystem::s_CompletionCV;
+    std::mutex JobSystem::s_AllDoneMutex;
+    std::condition_variable JobSystem::s_AllDoneCV;
 
     // JobHandle implementation
     bool JobHandle::IsComplete() const {
-        // Simple implementation - assumes job is complete if id is 0
-        // In production, would track completion via atomic flags
-        return id == 0;
+        if (id == 0) {
+            return true;  // No job / invalid handle is considered complete
+        }
+        std::lock_guard<std::mutex> lock(JobSystem::s_CompletionMutex);
+        return JobSystem::s_CompletedJobs.find(id) != JobSystem::s_CompletedJobs.end();
+    }
+
+    void JobSystem::MarkJobComplete(uint64_t jobId) {
+        std::lock_guard<std::mutex> lock(s_CompletionMutex);
+        s_CompletedJobs.insert(jobId);
+        s_CompletedJobOrder.push_back(jobId);
+        // Prune old entries to prevent unbounded growth (keep last 8192)
+        const size_t maxCompleted = 8192;
+        while (s_CompletedJobOrder.size() > maxCompleted) {
+            uint64_t oldId = s_CompletedJobOrder.front();
+            s_CompletedJobOrder.pop_front();
+            s_CompletedJobs.erase(oldId);
+        }
     }
 
     // JobQueue implementation
@@ -63,21 +92,31 @@ namespace GameEngine {
         }
 
         s_WorkerCount = workerCount;
+        s_WorkersReady.store(false);
 
         GE_CORE_INFO("Initializing JobSystem with {0} workers", workerCount);
 
+        // Phase 1: Pre-allocate all WorkerState objects and reserve vector space
+        s_Workers.reserve(workerCount);
         for (uint32_t i = 0; i < workerCount; ++i) {
             auto worker = std::make_unique<WorkerState>();
             worker->localQueue = std::make_unique<JobQueue>();
             worker->shouldStop.store(false);
             worker->workerId = i;
-            
-            WorkerState* workerPtr = worker.get();
             s_Workers.push_back(std::move(worker));
-            
-            // Start thread after adding to vector
-            s_Workers.back()->thread = std::thread(WorkerThread, workerPtr);
         }
+
+        // Phase 2: Start all worker threads (they will wait on the barrier)
+        for (uint32_t i = 0; i < workerCount; ++i) {
+            s_Workers[i]->thread = std::thread(WorkerThread, s_Workers[i].get());
+        }
+
+        // Phase 3: Signal all workers that initialization is complete
+        {
+            std::lock_guard<std::mutex> lock(s_InitMutex);
+            s_WorkersReady.store(true);
+        }
+        s_InitCV.notify_all();
 
         s_Initialized = true;
         GE_CORE_INFO("JobSystem initialized");
@@ -105,6 +144,14 @@ namespace GameEngine {
         s_Workers.clear();
         s_WorkerCount = 0;
         s_Initialized = false;
+        s_WorkersReady.store(false);
+
+        // Clear completed jobs tracking
+        {
+            std::lock_guard<std::mutex> lock(s_CompletionMutex);
+            s_CompletedJobs.clear();
+            s_CompletedJobOrder.clear();
+        }
 
         GE_CORE_INFO("JobSystem shutdown");
     }
@@ -149,27 +196,29 @@ namespace GameEngine {
         if (handle.id == 0) {
             return;
         }
-
-        // Simple spin-wait (TODO: Implement proper waiting with condition variables)
-        while (!handle.IsComplete()) {
-            std::this_thread::yield();
-        }
+        std::unique_lock<std::mutex> lock(s_CompletionMutex);
+        s_CompletionCV.wait(lock, [&handle] {
+            return s_CompletedJobs.find(handle.id) != s_CompletedJobs.end();
+        });
     }
 
     void JobSystem::WaitForAll() {
-        if (!s_Initialized) {
-            return;
-        }
-
-        // Wait until all jobs are complete
-        while (s_ActiveJobs.load(std::memory_order_acquire) > 0) {
-            std::this_thread::yield();
-        }
+        if (!s_Initialized) return;
+        std::unique_lock<std::mutex> lock(s_AllDoneMutex);
+        s_AllDoneCV.wait(lock, [] {
+            return s_ActiveJobs.load(std::memory_order_acquire) == 0;
+        });
     }
 
     void JobSystem::WorkerThread(WorkerState* state) {
         s_LocalQueue = state->localQueue.get();
         s_WorkerId = state->workerId;
+
+        // Wait for all workers to be initialized before starting work
+        {
+            std::unique_lock<std::mutex> lock(s_InitMutex);
+            s_InitCV.wait(lock, [] { return s_WorkersReady.load(); });
+        }
 
         while (!state->shouldStop.load(std::memory_order_acquire)) {
             Job job;
@@ -178,8 +227,14 @@ namespace GameEngine {
             if (state->localQueue->TryPop(job)) {
                 // Check dependency
                 if (job.dependency.id == 0 || job.dependency.IsComplete()) {
+                    uint64_t jobId = job.id;
                     if (job.func) job.func();
-                    s_ActiveJobs.fetch_sub(1, std::memory_order_release);
+                    MarkJobComplete(jobId);
+                    uint32_t prev = s_ActiveJobs.fetch_sub(1, std::memory_order_release);
+                    if (prev == 1) {
+                        std::lock_guard<std::mutex> lk(s_AllDoneMutex);
+                        s_AllDoneCV.notify_all();
+                    }
                 } else {
                     // Dependency not ready, push back
                     state->localQueue->Push(std::move(job));
@@ -190,8 +245,14 @@ namespace GameEngine {
             // Try global queue
             if (s_GlobalQueue.TryPop(job)) {
                 if (job.dependency.id == 0 || job.dependency.IsComplete()) {
+                    uint64_t jobId = job.id;
                     if (job.func) job.func();
-                    s_ActiveJobs.fetch_sub(1, std::memory_order_release);
+                    MarkJobComplete(jobId);
+                    uint32_t prev = s_ActiveJobs.fetch_sub(1, std::memory_order_release);
+                    if (prev == 1) {
+                        std::lock_guard<std::mutex> lk(s_AllDoneMutex);
+                        s_AllDoneCV.notify_all();
+                    }
                 } else {
                     // Dependency not ready, push back
                     s_GlobalQueue.Push(std::move(job));
@@ -210,8 +271,14 @@ namespace GameEngine {
                 auto& targetQueue = *s_Workers[targetId]->localQueue;
                 if (targetQueue.TryPop(job)) {
                     if (job.dependency.id == 0 || job.dependency.IsComplete()) {
+                        uint64_t jobId = job.id;
                         if (job.func) job.func();
-                        s_ActiveJobs.fetch_sub(1, std::memory_order_release);
+                        MarkJobComplete(jobId);
+                        uint32_t prev = s_ActiveJobs.fetch_sub(1, std::memory_order_release);
+                        if (prev == 1) {
+                            std::lock_guard<std::mutex> lk(s_AllDoneMutex);
+                            s_AllDoneCV.notify_all();
+                        }
                         stole = true;
                         break;
                     } else {

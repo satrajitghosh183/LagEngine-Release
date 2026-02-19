@@ -1,4 +1,6 @@
 #include "CharacterController.hpp"
+#include "../PhysicsWorld.hpp"
+#include "../Shapes/PlaneShape.hpp"
 #include "../../Core/Logger.hpp"
 
 namespace GameEngine {
@@ -80,26 +82,40 @@ namespace Physics {
     }
 
     void CharacterController::DetectGround() {
-        // Raycast downward to detect ground
-        // TODO: Implement actual raycast against physics world
-        
-        // Simplified ground detection
-        float groundY = 0.0f;  // Assume ground at y=0 for now
-        float distanceToGround = m_Position.y - m_CapsuleShape->GetRadius() - groundY;
-        
-        m_IsGrounded = distanceToGround <= GroundCheckDistance;
-        
-        if (m_IsGrounded) {
-            m_GroundNormal = glm::vec3(0, 1, 0);
-            
-            // Check if on slope
-            float slopeAngle = glm::degrees(acos(glm::dot(m_GroundNormal, glm::vec3(0, 1, 0))));
-            m_OnSlope = slopeAngle > 0.1f && slopeAngle < SlopeLimit;
+        float halfHeight = m_CapsuleShape->GetHeight() * 0.5f - m_CapsuleShape->GetRadius();
+        glm::vec3 rayOrigin = m_Position - glm::vec3(0, halfHeight, 0);
+        glm::vec3 rayDir(0, -1, 0);
+        float maxDist = GroundCheckDistance + SkinWidth + 0.01f;
+
+        if (m_PhysicsWorld) {
+            CollisionShape::RaycastHit hit;
+            if (m_PhysicsWorld->Raycast(rayOrigin, rayDir, maxDist, hit)) {
+                float distanceToGround = hit.Distance;
+                m_IsGrounded = distanceToGround <= (GroundCheckDistance + SkinWidth);
+                if (m_IsGrounded) {
+                    m_GroundNormal = hit.Normal;
+                    float slopeAngle = glm::degrees(acos(glm::clamp(glm::dot(m_GroundNormal, glm::vec3(0, 1, 0)), -1.0f, 1.0f)));
+                    m_OnSlope = slopeAngle > 0.1f && slopeAngle < SlopeLimit;
+                } else {
+                    m_OnSlope = false;
+                }
+            } else {
+                m_IsGrounded = false;
+                m_OnSlope = false;
+            }
         } else {
-            m_OnSlope = false;
+            // Fallback: assume ground at y=0 when no physics world set
+            float groundY = 0.0f;
+            float distanceToGround = m_Position.y - m_CapsuleShape->GetRadius() - groundY;
+            m_IsGrounded = distanceToGround <= GroundCheckDistance;
+            if (m_IsGrounded) {
+                m_GroundNormal = glm::vec3(0, 1, 0);
+                m_OnSlope = false;
+            } else {
+                m_OnSlope = false;
+            }
         }
-        
-        // Process buffered jump
+
         if (m_IsGrounded && m_JumpBufferCounter > 0) {
             Jump();
         }

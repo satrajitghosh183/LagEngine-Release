@@ -2,6 +2,56 @@
 
 namespace GameEngine {
 
+    CreateEntityCommand::CreateEntityCommand(const Ref<Scene>& scene, const std::string& name)
+        : m_Scene(scene), m_Name(name) {}
+
+    void CreateEntityCommand::Execute() {
+        if (!m_Scene) return;
+        Entity e = m_Scene->CreateEntity(m_Name);
+        m_EntityUUID = e.GetUUID();
+    }
+
+    void CreateEntityCommand::Undo() {
+        if (!m_Scene || m_EntityUUID == 0) return;
+        Entity e = m_Scene->GetEntityByUUID(m_EntityUUID);
+        if (e.IsValid()) m_Scene->DestroyEntity(e);
+    }
+
+    DeleteEntityCommand::DeleteEntityCommand(const Ref<Scene>& scene, UUID entityUUID)
+        : m_Scene(scene), m_EntityUUID(entityUUID) {}
+
+    void DeleteEntityCommand::Execute() {
+        if (!m_Scene || m_EntityUUID == 0) return;
+        Entity e = m_Scene->GetEntityByUUID(m_EntityUUID);
+        if (e.IsValid()) {
+            m_SavedName = e.GetName();
+            m_Scene->DestroyEntity(e);
+            m_Executed = true;
+        }
+    }
+
+    void DeleteEntityCommand::Undo() {
+        if (!m_Scene || !m_Executed) return;
+        m_Scene->CreateEntityWithUUID(m_EntityUUID, m_SavedName);
+    }
+
+    ReparentEntityCommand::ReparentEntityCommand(const Ref<Scene>& scene, UUID entityUUID, UUID oldParentUUID, UUID newParentUUID)
+        : m_Scene(scene), m_EntityUUID(entityUUID), m_OldParentUUID(oldParentUUID), m_NewParentUUID(newParentUUID) {}
+
+    void ReparentEntityCommand::Execute() {
+        if (!m_Scene) return;
+        Entity child = m_Scene->GetEntityByUUID(m_EntityUUID);
+        Entity newParent = m_Scene->GetEntityByUUID(m_NewParentUUID);
+        if (child.IsValid() && newParent.IsValid()) child.SetParent(newParent);
+    }
+
+    void ReparentEntityCommand::Undo() {
+        if (!m_Scene) return;
+        Entity child = m_Scene->GetEntityByUUID(m_EntityUUID);
+        Entity oldParent = m_OldParentUUID != 0 ? m_Scene->GetEntityByUUID(m_OldParentUUID) : Entity();
+        if (child.IsValid()) child.SetParent(oldParent);
+    }
+
     CommandHistory::CommandHistory()
         : m_CurrentIndex(0) {
     }

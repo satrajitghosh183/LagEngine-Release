@@ -1,0 +1,7 @@
+{
+    "name": "Deferred Rendering",
+    "description": "Deferred rendering pipeline with G-Buffer, SSAO, PBR lighting, and AI render optimizer.",
+    "category": "Graphics",
+    "scene": "scene.json",
+    "thumbnail": ""
+}

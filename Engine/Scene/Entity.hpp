@@ -80,7 +80,7 @@ namespace GameEngine {
         Entity GetParent() const;
         void AddChild(Entity child);
         void RemoveChild(Entity child);
-        const std::vector<Entity>& GetChildren() const;
+        std::vector<Entity> GetChildren() const;
         bool HasParent() const;
         
         /**
@@ -102,9 +102,14 @@ namespace GameEngine {
         void Destroy();
         
         /**
-         * @brief Check if entity is valid
+         * @brief Check if entity is valid (scene exists, UUID non-zero, and entity still in scene)
          */
-        bool IsValid() const { return m_Scene != nullptr && m_UUID != UUID(0); }
+        bool IsValid() const;
+        
+        /**
+         * @brief Get the scene this entity belongs to
+         */
+        Scene* GetScene() const { return m_Scene; }
         
         operator bool() const { return IsValid(); }
         operator UUID() const { return m_UUID; }

@@ -13,37 +13,36 @@
 #include <imgui.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
+#include <filesystem>
 
-// Simple shader for rendering
+// Simple shader for rendering - loads from file with inline fallback
 static Ref<Shader> CreateBasicShader() {
+    std::string vertPath = "Assets/Shaders/basic.vert";
+    std::string fragPath = "Assets/Shaders/basic.frag";
+    if (std::filesystem::exists(vertPath) && std::filesystem::exists(fragPath)) {
+        return CreateRef<Shader>(vertPath, fragPath);
+    }
     const char* vertexSrc = R"(
-        #version 450 core
+        #version 420 core
         layout(location = 0) in vec3 a_Position;
         layout(location = 1) in vec3 a_Normal;
-        
         uniform mat4 u_ViewProjection;
         uniform mat4 u_Transform;
-        
         out vec3 v_Normal;
         out vec3 v_Position;
-        
         void main() {
             v_Position = vec3(u_Transform * vec4(a_Position, 1.0));
             v_Normal = mat3(transpose(inverse(u_Transform))) * a_Normal;
             gl_Position = u_ViewProjection * vec4(v_Position, 1.0);
         }
     )";
-    
     const char* fragmentSrc = R"(
-        #version 450 core
+        #version 420 core
         layout(location = 0) out vec4 FragColor;
-        
         in vec3 v_Normal;
         in vec3 v_Position;
-        
         uniform vec3 u_Color;
         uniform vec3 u_LightDir;
-        
         void main() {
             vec3 normal = normalize(v_Normal);
             float diff = max(dot(normal, -u_LightDir), 0.3);
@@ -51,7 +50,6 @@ static Ref<Shader> CreateBasicShader() {
             FragColor = vec4(color, 1.0);
         }
     )";
-    
     return CreateRef<Shader>("Basic", vertexSrc, fragmentSrc);
 }
 
@@ -273,7 +271,12 @@ void RobotArmApp::OnRender() {
     DebugDraw::DrawCross(m_TargetPosition, 0.5f, glm::vec3(1, 0, 0), 0.0f);
     
     DebugDraw::Update(Time::GetDeltaTime());
-    
+    auto scene = Application::Get().GetSceneManager().GetActiveScene();
+    if (scene) {
+        Camera3D* cam = scene->GetMainCamera();
+        if (cam) DebugDraw::Render(*cam);
+    }
+
     RenderUI();
 }
 

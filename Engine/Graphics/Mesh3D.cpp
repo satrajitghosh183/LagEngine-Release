@@ -135,22 +135,24 @@ namespace GameEngine {
             glm::vec2 deltaUV1 = v1.TexCoords - v0.TexCoords;
             glm::vec2 deltaUV2 = v2.TexCoords - v0.TexCoords;
             
-            float f = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
-            
+            float denom = deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y;
+            if (std::abs(denom) < 1e-8f) continue; // Skip degenerate UV triangles
+            float f = 1.0f / denom;
+
             glm::vec3 tangent;
             tangent.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
             tangent.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
             tangent.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
-            
+
             glm::vec3 bitangent;
             bitangent.x = f * (-deltaUV2.x * edge1.x + deltaUV1.x * edge2.x);
             bitangent.y = f * (-deltaUV2.x * edge1.y + deltaUV1.x * edge2.y);
             bitangent.z = f * (-deltaUV2.x * edge1.z + deltaUV1.x * edge2.z);
-            
+
             v0.Tangent += tangent;
             v1.Tangent += tangent;
             v2.Tangent += tangent;
-            
+
             v0.Bitangent += bitangent;
             v1.Bitangent += bitangent;
             v2.Bitangent += bitangent;
@@ -158,15 +160,29 @@ namespace GameEngine {
         
         // Normalize and orthogonalize
         for (auto& vertex : m_Vertices) {
+            float tangentLen = glm::length(vertex.Tangent);
+            if (tangentLen < 1e-6f) {
+                // No tangent data - generate a default tangent from the normal
+                glm::vec3 up = (std::abs(vertex.Normal.y) < 0.999f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+                vertex.Tangent = glm::normalize(glm::cross(up, vertex.Normal));
+                vertex.Bitangent = glm::cross(vertex.Normal, vertex.Tangent);
+                continue;
+            }
+
             // Gram-Schmidt orthogonalize
             vertex.Tangent = glm::normalize(vertex.Tangent - vertex.Normal * glm::dot(vertex.Normal, vertex.Tangent));
-            
+
             // Calculate handedness
             if (glm::dot(glm::cross(vertex.Normal, vertex.Tangent), vertex.Bitangent) < 0.0f) {
                 vertex.Tangent *= -1.0f;
             }
-            
-            vertex.Bitangent = glm::normalize(vertex.Bitangent);
+
+            float bitangentLen = glm::length(vertex.Bitangent);
+            if (bitangentLen > 1e-6f) {
+                vertex.Bitangent = vertex.Bitangent / bitangentLen;
+            } else {
+                vertex.Bitangent = glm::cross(vertex.Normal, vertex.Tangent);
+            }
         }
     }
 

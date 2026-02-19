@@ -2,7 +2,9 @@
 
 #include "../Core/Base.hpp"
 #include "../Core/UUID.hpp"
-#include "../Graphics/PhysicsWorld.hpp"
+#include "../Core/Logger.hpp"
+#include "../Physics/PhysicsWorld.hpp"
+#include <stdexcept>
 #include "../Graphics/Camera3D.hpp"
 #include "Entity.hpp"
 #include "Components/Component.hpp"
@@ -72,6 +74,11 @@ namespace GameEngine {
          * @brief Get entity count
          */
         size_t GetEntityCount() const { return m_Entities.size(); }
+
+        /**
+         * @brief Check if an entity exists by UUID (O(1))
+         */
+        bool HasEntity(UUID uuid) const { return m_Entities.find(uuid) != m_Entities.end(); }
         
         /**
          * @brief Scene properties
@@ -100,6 +107,13 @@ namespace GameEngine {
         bool IsPaused() const { return m_IsPaused; }
         void SetPaused(bool paused) { m_IsPaused = paused; }
         
+        /**
+         * @brief Merge another scene into this scene
+         * @param other Scene to merge from
+         * @param prefix Optional prefix for entity names to avoid collisions
+         */
+        void Merge(const Ref<Scene>& other, const std::string& prefix = "");
+        
     private:
         // Entity data structure
         struct EntityData {
@@ -120,6 +134,7 @@ namespace GameEngine {
         EntityData& GetEntityData(UUID uuid);
         void UpdateEntityHierarchy(Entity entity);
         void DestroyEntityInternal(UUID uuid);
+        void UpdateEntityNameIndex(UUID uuid, const std::string& newName);
         
         // Component management
         template<typename T>
@@ -144,7 +159,8 @@ namespace GameEngine {
         
         // Entity storage
         std::unordered_map<UUID, EntityData> m_Entities;
-        
+        std::unordered_map<std::string, UUID> m_NameIndex;
+
         // Physics
         Ref<Physics::PhysicsWorld> m_PhysicsWorld;
         
@@ -180,17 +196,17 @@ namespace GameEngine {
     T& Scene::AddComponent(UUID uuid, Args&&... args) {
         auto& entityData = GetEntityData(uuid);
         auto typeIndex = std::type_index(typeid(T));
-        
-        GE_CORE_ASSERT(entityData.Components.find(typeIndex) == entityData.Components.end(), 
-                       "Entity already has component!");
-        
+
+        if (entityData.Components.find(typeIndex) != entityData.Components.end()) {
+            GE_CORE_ERROR("Entity already has component!");
+            throw std::runtime_error("Entity already has component!");
+        }
+
         auto component = CreateScope<T>(std::forward<Args>(args)...);
         T* componentPtr = component.get();
         
-        // Set owner - create Entity and store pointer
-        // Note: We need Entity to be fully defined here, so we create it directly
-        // Entity is copyable (has default copy constructor)
-        component->Owner = new Entity(uuid, this);
+        component->OwnerUUID = uuid;
+        component->OwnerScene = this;
         
         entityData.Components[typeIndex] = std::move(component);
         
@@ -207,12 +223,7 @@ namespace GameEngine {
         
         auto it = entityData.Components.find(typeIndex);
         if (it != entityData.Components.end()) {
-            // Call OnDestroy
             it->second->OnDestroy();
-            
-            // Delete owner pointer
-            delete it->second->Owner;
-            
             entityData.Components.erase(it);
         }
     }
@@ -238,23 +249,38 @@ namespace GameEngine {
 
     template<typename T, typename... Args>
     T& Entity::AddComponent(Args&&... args) {
-        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        if (!IsValid()) {
+            GE_CORE_ERROR("AddComponent on invalid entity");
+            throw std::runtime_error("Invalid entity!");
+        }
         return m_Scene->AddComponent<T>(m_UUID, std::forward<Args>(args)...);
     }
 
     template<typename T>
     T& Entity::GetComponent() {
-        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        if (!IsValid()) {
+            GE_CORE_ERROR("GetComponent on invalid entity");
+            throw std::runtime_error("Invalid entity!");
+        }
         T* comp = m_Scene->GetComponent<T>(m_UUID);
-        GE_CORE_ASSERT(comp, "Entity does not have component!");
+        if (!comp) {
+            GE_CORE_ERROR("Entity does not have component");
+            throw std::runtime_error("Entity does not have component!");
+        }
         return *comp;
     }
 
     template<typename T>
     const T& Entity::GetComponent() const {
-        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        if (!IsValid()) {
+            GE_CORE_ERROR("GetComponent on invalid entity");
+            throw std::runtime_error("Invalid entity!");
+        }
         T* comp = const_cast<Scene*>(m_Scene)->GetComponent<T>(m_UUID);
-        GE_CORE_ASSERT(comp, "Entity does not have component!");
+        if (!comp) {
+            GE_CORE_ERROR("Entity does not have component");
+            throw std::runtime_error("Entity does not have component!");
+        }
         return *comp;
     }
 
@@ -266,7 +292,10 @@ namespace GameEngine {
 
     template<typename T>
     void Entity::RemoveComponent() {
-        GE_CORE_ASSERT(IsValid(), "Invalid entity!");
+        if (!IsValid()) {
+            GE_CORE_ERROR("RemoveComponent on invalid entity");
+            throw std::runtime_error("Invalid entity!");
+        }
         m_Scene->RemoveComponent<T>(m_UUID);
     }
 

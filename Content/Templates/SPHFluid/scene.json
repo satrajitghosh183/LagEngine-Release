@@ -1,0 +1,81 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "SPH Water Box",
+    "uuid": "f1a2b3c4d5e60001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "f1a2b3c4d5e60010",
+            "name": "Fluid Emitter",
+            "tag": "Default",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 2.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "FluidEmitterComponent",
+                    "ParticleCount": 5000,
+                    "RestDensity": 1000.0,
+                    "GasConstant": 2000.0,
+                    "Viscosity": 250.0,
+                    "SmoothingRadius": 0.1,
+                    "ParticleMass": 0.02,
+                    "TimeStep": 0.001,
+                    "BoundaryMin": [-1.0, 0.0, -1.0],
+                    "BoundaryMax": [1.0, 3.0, 1.0]
+                }
+            ]
+        },
+        {
+            "uuid": "f1a2b3c4d5e60011",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 2.0, 5.0],
+                    "rotation": [-10.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 1000.0,
+                    "isPrimary": true
+                }
+            ]
+        },
+        {
+            "uuid": "f1a2b3c4d5e60012",
+            "name": "Directional Light",
+            "tag": "Light",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 10.0, 0.0],
+                    "rotation": [-45.0, 30.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "LightComponent",
+                    "lightType": "Directional",
+                    "color": [1.0, 1.0, 1.0],
+                    "intensity": 1.0,
+                    "castShadows": true
+                }
+            ]
+        }
+    ]
+}

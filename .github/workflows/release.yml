@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+          - os: macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install cmake
+
+      - name: Configure (Ubuntu/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EDITOR=ON -DBUILD_EXAMPLES=ON -DBUILD_TESTS=OFF
+
+      - name: Configure (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 \
+            -DBUILD_EDITOR=ON -DBUILD_EXAMPLES=ON -DBUILD_TESTS=OFF
+
+      - name: Build (Ubuntu/macOS)
+        if: matrix.os != 'windows-latest'
+        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cmake --build build --config Release -j
+
+      - name: Package (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd build && cpack -G "DEB;TGZ" && cd ..
+        env:
+          CPACK_PACKAGE_FILE_NAME: GameEngine-${{ github.ref_name }}-Linux
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd build && cpack -G "NSIS;ZIP" -C Release && cd ..
+        env:
+          CPACK_PACKAGE_FILE_NAME: GameEngine-${{ github.ref_name }}-Windows
+
+      - name: Package (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd build && cpack -G "DragNDrop;ZIP" && cd ..
+        env:
+          CPACK_PACKAGE_FILE_NAME: GameEngine-${{ github.ref_name }}-macOS
+
+      - name: Upload artifacts (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-linux
+          path: build/*.deb;build/*.tar.gz
+
+      - name: Upload artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows
+          path: build/*.exe;build/*.zip
+
+      - name: Upload artifacts (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-macos
+          path: build/*.dmg;build/*.zip
+
+  create-release:
+    needs: package
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

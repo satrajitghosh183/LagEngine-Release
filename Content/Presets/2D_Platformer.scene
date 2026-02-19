@@ -1,0 +1,87 @@
+{
+    "version": "2.0.0",
+    "versionMajor": 2,
+    "versionMinor": 0,
+    "versionPatch": 0,
+    "name": "2D Platformer",
+    "uuid": "a2b3c4d5e6f70001",
+    "physics": {
+        "gravity": [0.0, -9.81, 0.0]
+    },
+    "entities": [
+        {
+            "uuid": "a2b3c4d5e6f70010",
+            "name": "Player",
+            "tag": "Player",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 2.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "SpriteComponent",
+                    "Color": [0.0, 0.8, 1.0, 1.0],
+                    "Width": 1.0,
+                    "Height": 1.0,
+                    "TexturePath": ""
+                },
+                {
+                    "type": "SpriteAnimatorComponent",
+                    "FrameColumns": 4,
+                    "FrameRows": 4,
+                    "TotalFrames": 16,
+                    "FrameRate": 12.0,
+                    "Loop": true,
+                    "Playing": true
+                }
+            ]
+        },
+        {
+            "uuid": "a2b3c4d5e6f70011",
+            "name": "Ground",
+            "tag": "Ground",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [20.0, 0.5, 1.0]
+                },
+                {
+                    "type": "SpriteComponent",
+                    "Color": [0.4, 0.3, 0.2, 1.0],
+                    "Width": 20.0,
+                    "Height": 0.5,
+                    "TexturePath": ""
+                }
+            ]
+        },
+        {
+            "uuid": "a2b3c4d5e6f70012",
+            "name": "Main Camera",
+            "tag": "MainCamera",
+            "active": true,
+            "components": [
+                {
+                    "type": "TransformComponent",
+                    "position": [0.0, 3.0, 10.0],
+                    "rotation": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "CameraComponent",
+                    "fov": 60.0,
+                    "nearClip": 0.1,
+                    "farClip": 100.0,
+                    "isPrimary": true,
+                    "orthographic": true,
+                    "orthoSize": 10.0
+                }
+            ]
+        }
+    ]
+}

@@ -1,6 +1,6 @@
 #include "CameraComponent.hpp"
 #include "TransformComponent.hpp"
-#include "../Entity.hpp"
+#include "../Scene.hpp"
 
 namespace GameEngine {
 

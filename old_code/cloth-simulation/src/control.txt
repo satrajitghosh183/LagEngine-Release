@@ -1,0 +1,10 @@
+Larger movement increments when SHIFT is held (5x normal)
+Stronger wind controls with bigger steps (0.05 normally, 0.2 with SHIFT)
+Wind gust feature (G key) for sudden bursts of wind
+Sphere size controls (Page Up/Down)
+Spring stiffness controls (1 key with SHIFT/CTRL modifiers)
+Damping controls (2 key with SHIFT/CTRL modifiers)
+Extreme mode toggle (X key, SHIFT+X for ultra extreme)
+Reset to normal (N key)
+Explosion effect (E key) that applies strong upward forces
+Right-click force application (conceptual, would need ray casting)

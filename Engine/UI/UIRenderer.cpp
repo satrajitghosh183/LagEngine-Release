@@ -46,7 +46,7 @@ namespace GameEngine {
 
         // Setup Platform/Renderer bindings
         ImGui_ImplGlfw_InitForOpenGL(window, true);
-        ImGui_ImplOpenGL3_Init("#version 450");
+        ImGui_ImplOpenGL3_Init("#version 420");
 
         s_Initialized = true;
         GE_CORE_INFO("UIRenderer initialized");

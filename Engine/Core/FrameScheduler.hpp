@@ -52,7 +52,7 @@ namespace GameEngine {
         void ScheduleRenderGraphBuild();
         void ScheduleGPUSubmissions();
 
-        bool m_UseJobs = true;
+        bool m_UseJobs = false;  // Disabled by default - job completion tracking needs more work
         std::vector<JobHandle> m_FrameJobs;
     };
 

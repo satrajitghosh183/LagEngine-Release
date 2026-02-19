@@ -6,6 +6,7 @@
 #include "Material.hpp"
 #include <glm/glm.hpp>
 #include <vector>
+#include <string>
 
 namespace GameEngine {
 
@@ -62,6 +63,18 @@ namespace GameEngine {
         Mesh3D();
         
         ~Mesh3D() = default;
+        
+        /**
+         * @brief Get/Set mesh name
+         */
+        const std::string& GetName() const { return m_Name; }
+        void SetName(const std::string& name) { m_Name = name; }
+
+        /**
+         * @brief Source path (set when loaded from an asset file)
+         */
+        const std::string& GetSourcePath() const { return m_SourcePath; }
+        void SetSourcePath(const std::string& path) { m_SourcePath = path; }
         
         /**
          * @brief Upload mesh data to GPU
@@ -126,6 +139,8 @@ namespace GameEngine {
         void CalculateAABB();
         
     private:
+        std::string m_Name;
+        std::string m_SourcePath;    // Set when loaded from file (for serialization)
         std::vector<Vertex3D> m_Vertices;
         std::vector<uint32_t> m_Indices;
         
