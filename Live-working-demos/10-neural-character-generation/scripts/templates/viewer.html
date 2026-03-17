@@ -1,0 +1,591 @@
+{% extends "base.html" %}
+
+{% block title %}3D Viewer - {{ subject_id }}{% endblock %}
+
+{% block head %}
+<style>
+    #viewer-container {
+        width: 100%;
+        height: 600px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        overflow: hidden;
+        background-color: #1a1a2e;
+        position: relative;
+    }
+    #viewer-container canvas {
+        display: block;
+    }
+    .controls-panel {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #dee2e6;
+    }
+    .controls-panel h5 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #dee2e6;
+    }
+    .controls-panel h5:first-child {
+        margin-top: 0;
+    }
+    .viewer-overlay {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: #aaa;
+        pointer-events: none;
+        z-index: 10;
+    }
+    .viewer-overlay.hidden {
+        display: none;
+    }
+    #loadingSpinner {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 20;
+    }
+    .status-toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1050;
+    }
+    .btn-group-vertical .btn {
+        text-align: left;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>3D Viewer: {{ subject_id }}</h2>
+    <div>
+        <a href="/training/{{ subject_id }}" class="btn btn-outline-secondary btn-sm me-1">Back to Training</a>
+        <a href="/results/{{ subject_id }}" class="btn btn-outline-secondary btn-sm">Back to Results</a>
+    </div>
+</div>
+
+<div class="row">
+    <!-- 3D Viewport -->
+    <div class="col-md-9">
+        <div id="viewer-container">
+            <!-- Loading spinner -->
+            <div id="loadingSpinner">
+                <div class="spinner-border text-light" role="status" style="width: 3rem; height: 3rem;">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div class="text-light mt-2">Loading model...</div>
+            </div>
+            <!-- Fallback message -->
+            <div id="viewerFallback" class="viewer-overlay hidden">
+                <p>Unable to load the 3D model.</p>
+                <p><small>Check that the model file exists at<br><code>/outputs/{{ subject_id }}/mesh.glb</code></small></p>
+            </div>
+        </div>
+        <div class="mt-2 d-flex justify-content-between">
+            <small class="text-muted">Left-click + drag: rotate | Right-click + drag: pan | Scroll: zoom</small>
+            <small class="text-muted" id="polyCount"></small>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="col-md-3">
+        <div class="controls-panel">
+            <!-- Relighting -->
+            <h5>Relighting</h5>
+            <label for="relightPreset" class="form-label">Lighting Preset</label>
+            <select id="relightPreset" class="form-select mb-2">
+                <option value="studio">Studio</option>
+                <option value="sunset">Sunset</option>
+                <option value="film_noir">Film Noir</option>
+                <option value="sci_fi">Sci-Fi</option>
+                <option value="natural">Natural</option>
+            </select>
+            <button id="applyRelight" class="btn btn-primary w-100 mb-3">
+                Apply Relighting
+            </button>
+            <div id="relightStatus" class="small text-muted mb-3" style="display: none;"></div>
+
+            <!-- Rigging -->
+            <h5>Rigging</h5>
+            <button id="autoRig" class="btn btn-outline-primary w-100 mb-3">
+                Auto-Rig Model
+            </button>
+            <div id="rigStatus" class="small text-muted mb-3" style="display: none;"></div>
+
+            <!-- Export -->
+            <h5>Export</h5>
+            <a id="downloadGlb" href="/outputs/{{ subject_id }}/mesh.glb" download class="btn btn-success w-100 mb-2">
+                Download GLB
+            </a>
+            <a id="downloadObj" href="/outputs/{{ subject_id }}/mesh.obj" download class="btn btn-outline-success w-100 mb-3">
+                Download OBJ
+            </a>
+
+            <!-- Display Settings -->
+            <h5>Display</h5>
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="showGrid" checked>
+                <label class="form-check-label" for="showGrid">Show Grid</label>
+            </div>
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="showAxes" checked>
+                <label class="form-check-label" for="showAxes">Show Axes</label>
+            </div>
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" id="wireframe">
+                <label class="form-check-label" for="wireframe">Wireframe</label>
+            </div>
+            <label for="bgColor" class="form-label">Background Color</label>
+            <input type="color" id="bgColor" class="form-control form-control-color w-100 mb-2" value="#1a1a2e">
+
+            <!-- Camera -->
+            <h5>Camera</h5>
+            <div class="d-grid gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="resetCamera">Reset Camera</button>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-secondary" id="viewFront">Front</button>
+                    <button class="btn btn-outline-secondary" id="viewSide">Side</button>
+                    <button class="btn btn-outline-secondary" id="viewTop">Top</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast for status messages -->
+<div class="status-toast" id="statusToast" style="display: none;">
+    <div class="toast show" role="alert">
+        <div class="toast-header">
+            <strong class="me-auto" id="toastTitle">Status</strong>
+            <button type="button" class="btn-close" onclick="hideToast()"></button>
+        </div>
+        <div class="toast-body" id="toastBody"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Three.js via importmap for ES modules -->
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const subjectId = '{{ subject_id }}';
+const container = document.getElementById('viewer-container');
+
+// Scene setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+
+// Camera
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+camera.position.set(0, 1.5, 3);
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+container.appendChild(renderer.domElement);
+
+// Controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.target.set(0, 1, 0);
+controls.update();
+
+// Lighting (Studio preset default)
+const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+scene.add(ambientLight);
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+keyLight.position.set(5, 5, 5);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.width = 2048;
+keyLight.shadow.mapSize.height = 2048;
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+fillLight.position.set(-5, 3, -5);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xffffff, 0.4);
+rimLight.position.set(0, 5, -5);
+scene.add(rimLight);
+
+// Grid
+const gridHelper = new THREE.GridHelper(10, 20, 0x444444, 0x333333);
+scene.add(gridHelper);
+
+// Axes
+const axesHelper = new THREE.AxesHelper(1);
+scene.add(axesHelper);
+
+// Track loaded model for manipulation
+let loadedModel = null;
+
+// Load GLB model
+const loader = new GLTFLoader();
+const modelUrl = '/outputs/' + subjectId + '/mesh.glb';
+
+loader.load(
+    modelUrl,
+    function(gltf) {
+        loadedModel = gltf.scene;
+
+        // Center the model
+        const box = new THREE.Box3().setFromObject(loadedModel);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+
+        loadedModel.position.x -= center.x;
+        loadedModel.position.y -= box.min.y; // Place on ground
+        loadedModel.position.z -= center.z;
+
+        // Enable shadows on all meshes
+        let polyCount = 0;
+        loadedModel.traverse(function(child) {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                if (child.geometry && child.geometry.index) {
+                    polyCount += child.geometry.index.count / 3;
+                } else if (child.geometry) {
+                    polyCount += child.geometry.attributes.position.count / 3;
+                }
+            }
+        });
+
+        scene.add(loadedModel);
+
+        // Update camera to frame the model
+        const maxDim = Math.max(size.x, size.y, size.z);
+        camera.position.set(0, size.y * 0.6, maxDim * 2);
+        controls.target.set(0, size.y * 0.5, 0);
+        controls.update();
+
+        // Update polygon count
+        document.getElementById('polyCount').textContent = Math.round(polyCount).toLocaleString() + ' triangles';
+
+        // Hide loading spinner
+        document.getElementById('loadingSpinner').style.display = 'none';
+    },
+    function(xhr) {
+        // Progress callback
+        if (xhr.lengthComputable) {
+            const pct = Math.round((xhr.loaded / xhr.total) * 100);
+            document.querySelector('#loadingSpinner .text-light').textContent = 'Loading model... ' + pct + '%';
+        }
+    },
+    function(error) {
+        console.error('Error loading model:', error);
+        document.getElementById('loadingSpinner').style.display = 'none';
+        document.getElementById('viewerFallback').classList.remove('hidden');
+    }
+);
+
+// Animation loop
+function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+}
+animate();
+
+// Handle window resize
+window.addEventListener('resize', function() {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+// --- Display Controls ---
+
+// Grid toggle
+document.getElementById('showGrid').addEventListener('change', function() {
+    gridHelper.visible = this.checked;
+});
+
+// Axes toggle
+document.getElementById('showAxes').addEventListener('change', function() {
+    axesHelper.visible = this.checked;
+});
+
+// Wireframe toggle
+document.getElementById('wireframe').addEventListener('change', function() {
+    const isWireframe = this.checked;
+    if (loadedModel) {
+        loadedModel.traverse(function(child) {
+            if (child.isMesh) {
+                child.material.wireframe = isWireframe;
+            }
+        });
+    }
+});
+
+// Background color
+document.getElementById('bgColor').addEventListener('input', function() {
+    scene.background = new THREE.Color(this.value);
+});
+
+// --- Camera Controls ---
+
+document.getElementById('resetCamera').addEventListener('click', function() {
+    camera.position.set(0, 1.5, 3);
+    controls.target.set(0, 1, 0);
+    controls.update();
+});
+
+document.getElementById('viewFront').addEventListener('click', function() {
+    camera.position.set(0, 1, 3);
+    controls.target.set(0, 1, 0);
+    controls.update();
+});
+
+document.getElementById('viewSide').addEventListener('click', function() {
+    camera.position.set(3, 1, 0);
+    controls.target.set(0, 1, 0);
+    controls.update();
+});
+
+document.getElementById('viewTop').addEventListener('click', function() {
+    camera.position.set(0, 4, 0.01);
+    controls.target.set(0, 0, 0);
+    controls.update();
+});
+
+// --- Lighting Presets ---
+
+const lightingPresets = {
+    studio: {
+        ambient: { color: 0x404040, intensity: 0.5 },
+        key:     { color: 0xffffff, intensity: 1.0, pos: [5, 5, 5] },
+        fill:    { color: 0x8888ff, intensity: 0.3, pos: [-5, 3, -5] },
+        rim:     { color: 0xffffff, intensity: 0.4, pos: [0, 5, -5] },
+        exposure: 1.0
+    },
+    sunset: {
+        ambient: { color: 0x332211, intensity: 0.4 },
+        key:     { color: 0xff8844, intensity: 1.2, pos: [-5, 2, 3] },
+        fill:    { color: 0x4444aa, intensity: 0.2, pos: [5, 3, -3] },
+        rim:     { color: 0xff6622, intensity: 0.6, pos: [0, 3, -5] },
+        exposure: 1.1
+    },
+    film_noir: {
+        ambient: { color: 0x111111, intensity: 0.15 },
+        key:     { color: 0xffffff, intensity: 1.5, pos: [3, 6, 2] },
+        fill:    { color: 0x222233, intensity: 0.05, pos: [-5, 2, -3] },
+        rim:     { color: 0xaaaaaa, intensity: 0.3, pos: [-2, 4, -4] },
+        exposure: 0.8
+    },
+    sci_fi: {
+        ambient: { color: 0x001122, intensity: 0.3 },
+        key:     { color: 0x00ccff, intensity: 1.0, pos: [4, 4, 4] },
+        fill:    { color: 0xff00ff, intensity: 0.4, pos: [-4, 2, -2] },
+        rim:     { color: 0x00ffcc, intensity: 0.6, pos: [0, 5, -4] },
+        exposure: 1.2
+    },
+    natural: {
+        ambient: { color: 0x8899aa, intensity: 0.6 },
+        key:     { color: 0xffffee, intensity: 0.9, pos: [3, 8, 5] },
+        fill:    { color: 0x99bbdd, intensity: 0.4, pos: [-4, 3, -2] },
+        rim:     { color: 0xffeedd, intensity: 0.2, pos: [0, 4, -5] },
+        exposure: 1.0
+    }
+};
+
+function applyLocalLighting(presetName) {
+    const preset = lightingPresets[presetName];
+    if (!preset) return;
+
+    ambientLight.color.setHex(preset.ambient.color);
+    ambientLight.intensity = preset.ambient.intensity;
+
+    keyLight.color.setHex(preset.key.color);
+    keyLight.intensity = preset.key.intensity;
+    keyLight.position.set(...preset.key.pos);
+
+    fillLight.color.setHex(preset.fill.color);
+    fillLight.intensity = preset.fill.intensity;
+    fillLight.position.set(...preset.fill.pos);
+
+    rimLight.color.setHex(preset.rim.color);
+    rimLight.intensity = preset.rim.intensity;
+    rimLight.position.set(...preset.rim.pos);
+
+    renderer.toneMappingExposure = preset.exposure;
+}
+
+// --- API Interactions ---
+
+// Apply Relighting (server-side)
+document.getElementById('applyRelight').addEventListener('click', function() {
+    const preset = document.getElementById('relightPreset').value;
+    const btn = this;
+    const statusEl = document.getElementById('relightStatus');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Processing...';
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Sending relight request...';
+
+    // Apply local lighting preview immediately
+    applyLocalLighting(preset);
+
+    fetch('/api/relight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_id: subjectId, preset: preset })
+    })
+    .then(function(response) {
+        if (!response.ok) throw new Error('Relighting failed');
+        return response.json();
+    })
+    .then(function(data) {
+        statusEl.textContent = 'Relighting applied. Reloading model...';
+        showToast('Relighting', 'Preset "' + preset + '" applied successfully.');
+
+        // Reload the model with new textures
+        if (data.model_url) {
+            reloadModel(data.model_url);
+        } else {
+            reloadModel(modelUrl);
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = 'Apply Relighting';
+        statusEl.style.display = 'none';
+    })
+    .catch(function(error) {
+        statusEl.textContent = 'Relighting failed: ' + error.message;
+        statusEl.className = 'small text-danger mb-3';
+        btn.disabled = false;
+        btn.innerHTML = 'Apply Relighting';
+        showToast('Error', 'Relighting failed: ' + error.message);
+    });
+});
+
+// Auto-Rig
+document.getElementById('autoRig').addEventListener('click', function() {
+    const btn = this;
+    const statusEl = document.getElementById('rigStatus');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rigging...';
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Auto-rigging in progress. This may take a minute...';
+
+    fetch('/api/rig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_id: subjectId })
+    })
+    .then(function(response) {
+        if (!response.ok) throw new Error('Auto-rigging failed');
+        return response.json();
+    })
+    .then(function(data) {
+        statusEl.textContent = 'Rigging complete!';
+        statusEl.className = 'small text-success mb-3';
+        showToast('Auto-Rig', 'Model rigged successfully. Reloading...');
+
+        // Reload model with rig
+        if (data.model_url) {
+            reloadModel(data.model_url);
+
+            // Update download links to rigged version
+            document.getElementById('downloadGlb').href = data.model_url;
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = 'Auto-Rig Model';
+    })
+    .catch(function(error) {
+        statusEl.textContent = 'Rigging failed: ' + error.message;
+        statusEl.className = 'small text-danger mb-3';
+        btn.disabled = false;
+        btn.innerHTML = 'Auto-Rig Model';
+        showToast('Error', 'Auto-rigging failed: ' + error.message);
+    });
+});
+
+// Reload model utility
+function reloadModel(url) {
+    if (loadedModel) {
+        scene.remove(loadedModel);
+        loadedModel = null;
+    }
+
+    document.getElementById('loadingSpinner').style.display = 'block';
+
+    loader.load(
+        url + '?t=' + Date.now(), // Cache bust
+        function(gltf) {
+            loadedModel = gltf.scene;
+
+            const box = new THREE.Box3().setFromObject(loadedModel);
+            const center = box.getCenter(new THREE.Vector3());
+
+            loadedModel.position.x -= center.x;
+            loadedModel.position.y -= box.min.y;
+            loadedModel.position.z -= center.z;
+
+            loadedModel.traverse(function(child) {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    // Reapply wireframe state
+                    child.material.wireframe = document.getElementById('wireframe').checked;
+                }
+            });
+
+            scene.add(loadedModel);
+            document.getElementById('loadingSpinner').style.display = 'none';
+        },
+        undefined,
+        function(error) {
+            console.error('Error reloading model:', error);
+            document.getElementById('loadingSpinner').style.display = 'none';
+            showToast('Error', 'Failed to reload the model.');
+        }
+    );
+}
+
+// Toast utility (expose to global scope for the close button)
+window.showToast = function(title, message) {
+    document.getElementById('toastTitle').textContent = title;
+    document.getElementById('toastBody').textContent = message;
+    document.getElementById('statusToast').style.display = 'block';
+    setTimeout(function() {
+        document.getElementById('statusToast').style.display = 'none';
+    }, 4000);
+};
+
+window.hideToast = function() {
+    document.getElementById('statusToast').style.display = 'none';
+};
+</script>
+{% endblock %}

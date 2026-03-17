@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../Engine/Core/Base.hpp"
+#include "../../Engine/Core/UUID.hpp"
 #include "../../Engine/Scene/Scene.hpp"
 #include "../../Engine/Graphics/Framebuffer.hpp"
 #include "../../Engine/Graphics/Camera3D.hpp"
@@ -45,7 +46,10 @@ namespace GameEngine {
         
         // Zoom (move closer/further from focus point)
         void Zoom(float delta);
-        
+
+        // Free-fly: translate focal point along camera-space axes
+        void Fly(float forward, float right, float up);
+
         // Focus on position
         void FocusOn(const glm::vec3& position);
         
@@ -149,7 +153,11 @@ namespace GameEngine {
         // RenderPath management
         void SetRenderPath(const Ref<RenderPath>& path) { m_ActiveRenderPath = path; }
         Ref<RenderPath> GetRenderPath() const { return m_ActiveRenderPath; }
-        
+
+        // Play mode: switches viewport to render from the scene's main camera
+        void SetPlayMode(bool play) { m_IsPlayMode = play; }
+        bool IsPlayMode() const { return m_IsPlayMode; }
+
     private:
         void HandleInput();
         void RenderSceneToFramebuffer();
@@ -157,6 +165,12 @@ namespace GameEngine {
         void DrawGrid();
         void DrawSelectionOutline();
         void PickEntity(const glm::vec2& mousePos);
+        // Returns true and fills outVP/outPos if a scene CameraComponent was found
+        bool FindMainCameraVP(glm::mat4& outVP, glm::vec3& outPos);
+        // Renders the scene from the selected camera entity into the preview framebuffer
+        void RenderCameraPreview();
+        // Draws frustum wireframe + body icon for every camera entity in the scene
+        void DrawCameraGizmos();
         
     private:
         Ref<Scene> m_Context;
@@ -174,11 +188,23 @@ namespace GameEngine {
         
         GizmoOperation m_GizmoOperation = GizmoOperation::Translate;
         GizmoMode m_GizmoMode = GizmoMode::World;
+
+        // Cached gizmo state - only update when changed to avoid redundant resets and lag
+        UUID m_LastGizmoTargetUUID = 0;
+        GizmoType m_LastGizmoType = GizmoType::Translate;
+        GizmoMode m_LastGizmoMode = GizmoMode::World;
+        float m_LastGizmoSize = -1.0f;
         
+        // Play mode flag (set by EditorApp each frame)
+        bool m_IsPlayMode = false;
+
         // Grid settings
         bool m_ShowGrid = true;
         float m_GridSize = 10.0f;
         int m_GridDivisions = 10;
+
+        // Small framebuffer for the camera-preview picture-in-picture overlay
+        Scope<Framebuffer> m_CameraPreviewFramebuffer;
 
         // Frustum culling
         Frustum m_Frustum;

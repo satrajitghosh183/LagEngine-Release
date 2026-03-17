@@ -1,0 +1,8 @@
+# RL_Backend applications
+
+add_subdirectory(hello_triangle)
+add_subdirectory(demo_indirectdraw)
+add_subdirectory(demo_physics_slow)
+add_subdirectory(demo_physics_parallel)
+add_subdirectory(demo_physics_rl)
+add_subdirectory(jobbench)

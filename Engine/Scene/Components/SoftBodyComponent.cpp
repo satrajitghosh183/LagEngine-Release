@@ -1,4 +1,7 @@
 #include "SoftBodyComponent.hpp"
+#include "../../Graphics/Mesh3D.hpp"
+#include <glm/glm.hpp>
+#include <algorithm>
 
 namespace GameEngine {
 
@@ -73,6 +76,7 @@ namespace GameEngine {
         if (!m_Solver || !IsSimulating) return;
         m_Solver->SetDamping(Damping);
         m_Solver->Solve(fixedDeltaTime, SubSteps);
+        UpdateMesh();
     }
 
     void SoftBodyComponent::OnDestroy() {
@@ -80,7 +84,31 @@ namespace GameEngine {
     }
 
     void SoftBodyComponent::UpdateMesh() {
-        // Update mesh vertices from particle positions if mesh exists
+        if (!m_Solver || !m_Mesh) return;
+
+        const auto& particles = m_Solver->GetParticles();
+        if (particles.empty()) return;
+
+        // Copy existing vertices so indices/UVs are preserved
+        std::vector<Vertex3D> verts(m_Mesh->GetVertices());
+        size_t count = std::min(verts.size(), particles.size());
+
+        for (size_t i = 0; i < count; i++) {
+            verts[i].Position = particles[i].position;
+        }
+
+        // Recalculate per-vertex normals from neighbours
+        for (int y = 1; y < GridResY - 1; y++) {
+            for (int x = 1; x < GridResX - 1; x++) {
+                int idx  = y * GridResX + x;
+                if ((size_t)idx >= count) continue;
+                glm::vec3 dx = verts[idx + 1].Position - verts[idx - 1].Position;
+                glm::vec3 dy = verts[idx + GridResX].Position - verts[idx - GridResX].Position;
+                verts[idx].Normal = glm::normalize(glm::cross(dx, dy));
+            }
+        }
+
+        m_Mesh->UpdateVertices(verts);
     }
 
     nlohmann::json SoftBodyComponent::Serialize() const {

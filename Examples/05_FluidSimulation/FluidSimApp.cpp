@@ -5,7 +5,6 @@
 #include "../../Engine/Utilities/Debug/DebugDraw.hpp"
 #include "../../Engine/Platform/Input.hpp"
 #include "../../Engine/Core/Time.hpp"
-#include "../../Engine/Core/RandomUtils.hpp"
 #include "../../Engine/Scene/Components/TransformComponent.hpp"
 #include "../../Engine/Scene/Components/MeshRendererComponent.hpp"
 #include "../../Engine/Scene/Components/CameraComponent.hpp"
@@ -16,7 +15,6 @@
 #include <cmath>
 #include <filesystem>
 
-// Simple shader for rendering - loads from file with inline fallback
 static Ref<Shader> CreateBasicShader() {
     std::string vertPath = "Assets/Shaders/basic.vert";
     std::string fragPath = "Assets/Shaders/basic.frag";
@@ -55,201 +53,220 @@ static Ref<Shader> CreateBasicShader() {
 }
 
 FluidSimulationApp::FluidSimulationApp()
-    : Application("SPH Fluid Simulation") {
+    : Application("SPH Water Simulation") {
 }
 
 void FluidSimulationApp::OnInit() {
     UIRenderer::Init();
     DebugDraw::Init();
     
+    m_BasicShader = CreateBasicShader();
+    
     CreateScene();
+    
+    m_FluidRenderer.Init();
+    
     SpawnFluidParticles();
     
-    GE_INFO("Fluid Simulation initialized!");
+    GE_INFO("SPH Water Simulation initialized with {} particles!", m_SPHSolver->GetParticleCount());
 }
 
 void FluidSimulationApp::CreateScene() {
     m_Scene = CreateRef<Scene>("FluidScene");
     GetSceneManager().SetActiveScene(m_Scene);
     
-    auto basicShader = CreateBasicShader();
+    m_SPHSolver = CreateRef<Physics::SPHSolver>(20000);
+    m_SPHSolver->BoundsMin = m_BoundsMin;
+    m_SPHSolver->BoundsMax = m_BoundsMax;
+    m_SPHSolver->SmoothingRadius = m_SmoothingRadius;
+    m_SPHSolver->Viscosity = m_Viscosity;
+    m_SPHSolver->RestDensity = m_RestDensity;
+    m_SPHSolver->GasConstant = m_GasConstant;
+    m_SPHSolver->BoundsDamping = m_BoundsDamping;
     
-    // Create SPH solver
-    m_SPHSolver = CreateRef<Physics::SPHSolver>(5000);
-    m_SPHSolver->BoundsMin = glm::vec3(-5, 0, -5);
-    m_SPHSolver->BoundsMax = glm::vec3(5, 10, 5);
-    m_SPHSolver->SmoothingRadius = 0.2f;
-    m_SPHSolver->Viscosity = 0.018f;
-    m_SPHSolver->RestDensity = 1000.0f;
-    
-    // Create camera
     m_CameraEntity = m_Scene->CreateEntity("Camera");
     m_CameraEntity.AddComponent<CameraComponent>();
     m_Scene->SetMainCamera(m_CameraEntity);
     
-    // Create container walls (for visualization)
-    auto createWall = [&](const glm::vec3& pos, const glm::vec3& scale) {
+    auto createWall = [&](const glm::vec3& pos, const glm::vec3& scale, const glm::vec3& color) {
         Entity wall = m_Scene->CreateEntity("Wall");
         auto& transform = wall.AddComponent<TransformComponent>();
         transform.Position = pos;
         transform.Scale = scale;
         
         auto wallMesh = MeshGenerator3D::CreateCube(1.0f);
-        auto wallMaterial = CreateRef<Material>(basicShader);
-        wallMaterial->SetVec3("u_Color", glm::vec3(0.3f, 0.3f, 0.4f));
+        auto wallMaterial = CreateRef<Material>(m_BasicShader);
+        wallMaterial->SetVec3("u_Color", color);
         wallMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
         wall.AddComponent<MeshRendererComponent>(wallMesh, wallMaterial);
         
         return wall;
     };
     
-    // Ground
-    createWall(glm::vec3(0, -0.25f, 0), glm::vec3(10, 0.5f, 10));
+    glm::vec3 domainCenter = (m_BoundsMin + m_BoundsMax) * 0.5f;
+    glm::vec3 domainSize = m_BoundsMax - m_BoundsMin;
     
-    // Walls
-    createWall(glm::vec3(-5, 5, 0), glm::vec3(0.2f, 10, 10));
-    createWall(glm::vec3(5, 5, 0), glm::vec3(0.2f, 10, 10));
-    createWall(glm::vec3(0, 5, -5), glm::vec3(10, 10, 0.2f));
-    createWall(glm::vec3(0, 5, 5), glm::vec3(10, 10, 0.2f));
+    float thickness = 0.02f;
+    glm::vec3 wallColor(0.4f, 0.4f, 0.5f);
     
-    // Create particle mesh (instanced sphere)
-    m_ParticleMesh = MeshGenerator3D::CreateSphere(0.1f, 8, 8);
-    m_FluidMaterial = CreateRef<Material>(basicShader);
-    m_FluidMaterial->SetVec3("u_Color", glm::vec3(0.2f, 0.5f, 0.9f));
-    m_FluidMaterial->SetVec3("u_LightDir", glm::normalize(glm::vec3(1, -1, 1)));
+    createWall(glm::vec3(domainCenter.x, m_BoundsMin.y - thickness * 0.5f, domainCenter.z),
+               glm::vec3(domainSize.x + thickness * 2, thickness, domainSize.z + thickness * 2), 
+               glm::vec3(0.5f, 0.5f, 0.55f));
+    
+    createWall(glm::vec3(m_BoundsMin.x - thickness * 0.5f, domainCenter.y, domainCenter.z),
+               glm::vec3(thickness, domainSize.y, domainSize.z), wallColor);
+    createWall(glm::vec3(m_BoundsMax.x + thickness * 0.5f, domainCenter.y, domainCenter.z),
+               glm::vec3(thickness, domainSize.y, domainSize.z), wallColor);
+    createWall(glm::vec3(domainCenter.x, domainCenter.y, m_BoundsMin.z - thickness * 0.5f),
+               glm::vec3(domainSize.x, domainSize.y, thickness), wallColor);
+    createWall(glm::vec3(domainCenter.x, domainCenter.y, m_BoundsMax.z + thickness * 0.5f),
+               glm::vec3(domainSize.x, domainSize.y, thickness), wallColor);
 }
 
 void FluidSimulationApp::SpawnFluidParticles() {
-    // Spawn fluid in a cube
-    float spacing = m_SPHSolver->SmoothingRadius * 0.9f;
-    int particlesPerAxis = 15;
+    m_SPHSolver->Clear();
     
-    for (int z = 0; z < particlesPerAxis; z++) {
-        for (int y = 0; y < particlesPerAxis; y++) {
-            for (int x = 0; x < particlesPerAxis; x++) {
-                glm::vec3 position = glm::vec3(
-                    -2.0f + x * spacing,
-                    2.0f + y * spacing,
-                    -2.0f + z * spacing
-                );
-                
-                m_SPHSolver->AddParticle(position);
-                m_ParticleCount++;
-            }
-        }
-    }
+    int nx = 36, ny = 25, nz = 18;
+    float spacing = 0.028f;
+    glm::vec3 start = m_BoundsMin + glm::vec3(0.1f, 0.1f, 0.08f);
     
-    GE_INFO("Spawned {0} fluid particles", m_ParticleCount);
+    m_SPHSolver->InitBlock(nx, ny, nz, spacing, start);
+    
+    GE_INFO("Spawned {} fluid particles in {}x{}x{} grid", 
+            m_SPHSolver->GetParticleCount(), nx, ny, nz);
 }
 
 void FluidSimulationApp::OnUpdate(float deltaTime) {
-    // Camera rotation
-    if (Input::IsMouseButtonPressed(MouseButton::Middle)) {
-        glm::vec2 delta = Input::GetMouseDelta();
-        m_CameraYaw += delta.x * 0.5f;
-        m_CameraPitch -= delta.y * 0.5f;
-        m_CameraPitch = glm::clamp(m_CameraPitch, -89.0f, 89.0f);
+    glm::vec2 currentMousePos = Input::GetMousePosition();
+    glm::vec2 mouseDelta = currentMousePos - m_LastMousePos;
+    
+    if (Input::IsMouseButtonPressed(MouseButton::Left)) {
+        if (!m_LeftMouseDown) {
+            m_LeftMouseDown = true;
+        } else {
+            m_CameraYaw -= mouseDelta.x * 0.005f;
+            m_CameraPitch -= mouseDelta.y * 0.005f;
+            m_CameraPitch = glm::clamp(m_CameraPitch, -1.55f, 1.2f);
+        }
+    } else {
+        m_LeftMouseDown = false;
     }
     
-    // Update camera
+    if (Input::IsMouseButtonPressed(MouseButton::Right)) {
+        if (!m_RightMouseDown) {
+            m_RightMouseDown = true;
+        } else {
+            glm::vec3 forward(std::cos(m_CameraYaw), 0, std::sin(m_CameraYaw));
+            glm::vec3 right(-forward.z, 0, forward.x);
+            m_CameraTarget = m_CameraTarget + right * (-mouseDelta.x * 0.002f * m_CameraDistance)
+                           + forward * (mouseDelta.y * 0.002f * m_CameraDistance);
+        }
+    } else {
+        m_RightMouseDown = false;
+    }
+    
+    float scrollDelta = Input::GetMouseScroll().y;
+    if (std::abs(scrollDelta) > 0.001f) {
+        m_CameraDistance *= std::pow(0.9f, scrollDelta);
+        m_CameraDistance = glm::clamp(m_CameraDistance, 0.5f, 6.0f);
+    }
+    
+    m_LastMousePos = currentMousePos;
+    
+    float cy = std::cos(m_CameraYaw), sy = std::sin(m_CameraYaw);
+    float cp = std::cos(m_CameraPitch), sp = std::sin(m_CameraPitch);
+    glm::vec3 dir(cp * cy, sp, cp * sy);
+    glm::vec3 eyePos = m_CameraTarget - dir * m_CameraDistance;
+    
     auto& camTransform = m_CameraEntity.GetComponent<TransformComponent>();
-    float camX = m_CameraDistance * cos(glm::radians(m_CameraYaw)) * cos(glm::radians(m_CameraPitch));
-    float camY = m_CameraDistance * sin(glm::radians(m_CameraPitch));
-    float camZ = m_CameraDistance * sin(glm::radians(m_CameraYaw)) * cos(glm::radians(m_CameraPitch));
-    camTransform.Position = glm::vec3(camX, camY + 5, camZ);
-    camTransform.LookAt(glm::vec3(0, 5, 0));
+    camTransform.Position = eyePos;
+    camTransform.LookAt(m_CameraTarget);
     
-    // Update fluid simulation
-    if (!m_Paused) {
-        m_SPHSolver->Update(deltaTime);
+    if (Input::IsKeyJustPressed(KeyCode::Space)) {
+        m_Paused = !m_Paused;
     }
     
-    // Spawn more particles
-    if (Input::IsKeyPressed(KeyCode::Space)) {
-        glm::vec3 spawnPos(Random::Range(-2.0f, 2.0f), 8.0f, Random::Range(-2.0f, 2.0f));
-        m_SPHSolver->AddParticle(spawnPos, glm::vec3(0, -1, 0));
-        m_ParticleCount++;
-    }
-    
-    // Reset
     if (Input::IsKeyJustPressed(KeyCode::R)) {
-        m_SPHSolver->Clear();
-        m_ParticleCount = 0;
         SpawnFluidParticles();
+    }
+    
+    if (!m_Paused) {
+        m_SPHSolver->SmoothingRadius = m_SmoothingRadius;
+        m_SPHSolver->Viscosity = m_Viscosity;
+        m_SPHSolver->RestDensity = m_RestDensity;
+        m_SPHSolver->GasConstant = m_GasConstant;
+        m_SPHSolver->BoundsDamping = m_BoundsDamping;
+        
+        float subDt = 0.004f;
+        for (int s = 0; s < m_Substeps; ++s) {
+            m_SPHSolver->Update(subDt);
+        }
     }
     
     m_Scene->Update(deltaTime);
 }
 
 void FluidSimulationApp::OnRender() {
-    RenderCommand::SetClearColor({0.1f, 0.1f, 0.15f, 1.0f});
+    RenderCommand::SetClearColor({1.0f, 1.0f, 1.0f, 1.0f});
     RenderCommand::Clear();
     
-    // Render fluid particles (simplified - just use debug draw)
-    
-    // Debug draw
-    DebugDraw::DrawGrid(10.0f, 10);
-    DebugDraw::DrawBox(
-        (m_SPHSolver->BoundsMin + m_SPHSolver->BoundsMax) * 0.5f,
-        m_SPHSolver->BoundsMax - m_SPHSolver->BoundsMin,
-        glm::quat(1, 0, 0, 0),
-        glm::vec3(1, 1, 0)
-    );
-    
-    DebugDraw::Update(Time::GetDeltaTime());
     auto scene = Application::Get().GetSceneManager().GetActiveScene();
-    if (scene) {
-        Camera3D* cam = scene->GetMainCamera();
-        if (cam) DebugDraw::Render(*cam);
+    Camera3D* cam = scene ? scene->GetMainCamera() : nullptr;
+    
+    if (cam && m_FluidRenderer.IsReady()) {
+        std::vector<glm::vec3> positions = m_SPHSolver->GetPositions();
+        m_FluidRenderer.Render(positions, cam->GetViewMatrix(), cam->GetProjectionMatrix(), m_ParticleRadius);
+    }
+    
+    if (cam) {
+        DebugDraw::DrawBox(
+            (m_BoundsMin + m_BoundsMax) * 0.5f,
+            m_BoundsMax - m_BoundsMin,
+            glm::quat(1, 0, 0, 0),
+            glm::vec3(0.5f, 0.5f, 0.6f)
+        );
+        
+        DebugDraw::Update(Time::GetDeltaTime());
+        DebugDraw::Render(*cam);
     }
 
     RenderUI();
 }
 
-void FluidSimulationApp::RenderFluidParticles(const Camera3D& /*camera*/) {
-    // Simple particle rendering (could be optimized with instancing)
-    const auto& particles = m_SPHSolver->GetParticles();
-    
-    for (const auto& particle : particles) {
-        // Color by density
-        float normalizedDensity = particle.Density / m_SPHSolver->RestDensity;
-        glm::vec3 color = glm::mix(
-            glm::vec3(0.2f, 0.5f, 0.9f), // Low density
-            glm::vec3(0.0f, 0.2f, 0.6f), // High density
-            glm::clamp(normalizedDensity - 0.5f, 0.0f, 1.0f)
-        );
-        
-        // Render sphere at particle position
-        DebugDraw::DrawSphere(particle.Position, 0.1f, color);
-    }
-}
-
 void FluidSimulationApp::RenderUI() {
     UIRenderer::BeginFrame();
     
-    ImGui::Begin("SPH Fluid Simulation");
+    ImGui::Begin("SPH Water Simulation");
     ImGui::Text("FPS: %.1f", Time::GetFPS());
     ImGui::Separator();
     
-    ImGui::Text("Particles: %d", m_ParticleCount);
+    ImGui::Text("Particles: %d", m_SPHSolver->GetParticleCount());
+    
+    if (m_Paused) {
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), "PAUSED (Space to resume)");
+    }
+    
     ImGui::Checkbox("Paused", &m_Paused);
+    ImGui::SliderInt("Substeps", &m_Substeps, 1, 5);
     
     ImGui::Separator();
     ImGui::Text("Simulation Parameters:");
-    ImGui::SliderFloat("Smoothing Radius", &m_SPHSolver->SmoothingRadius, 0.05f, 0.5f);
-    ImGui::SliderFloat("Viscosity", &m_SPHSolver->Viscosity, 0.001f, 0.1f);
-    ImGui::SliderFloat("Rest Density", &m_SPHSolver->RestDensity, 500.0f, 2000.0f);
-    ImGui::SliderFloat("Gas Constant", &m_SPHSolver->GasConstant, 1000.0f, 5000.0f);
+    ImGui::SliderFloat("Smoothing Radius", &m_SmoothingRadius, 0.02f, 0.1f, "%.3f");
+    ImGui::SliderFloat("Rest Density", &m_RestDensity, 500.0f, 2000.0f);
+    ImGui::SliderFloat("Gas Constant", &m_GasConstant, 500.0f, 5000.0f);
+    ImGui::SliderFloat("Viscosity", &m_Viscosity, 0.01f, 0.5f);
+    ImGui::SliderFloat("Bounce Damping", &m_BoundsDamping, 0.0f, 1.0f);
+    ImGui::SliderFloat("Particle Radius", &m_ParticleRadius, 0.005f, 0.05f, "%.3f");
     
     ImGui::Separator();
     ImGui::Text("Controls:");
-    ImGui::BulletText("Space: Spawn particles");
+    ImGui::BulletText("Left Mouse Drag: Orbit camera");
+    ImGui::BulletText("Right Mouse Drag: Pan camera");
+    ImGui::BulletText("Scroll: Zoom in/out");
+    ImGui::BulletText("Space: Pause/Resume");
     ImGui::BulletText("R: Reset simulation");
-    ImGui::BulletText("Middle Mouse: Rotate camera");
     
     if (ImGui::Button("Reset Simulation")) {
-        m_SPHSolver->Clear();
-        m_ParticleCount = 0;
         SpawnFluidParticles();
     }
     
@@ -259,6 +276,7 @@ void FluidSimulationApp::RenderUI() {
 }
 
 void FluidSimulationApp::OnShutdown() {
+    m_FluidRenderer.Shutdown();
     DebugDraw::Shutdown();
     UIRenderer::Shutdown();
 }

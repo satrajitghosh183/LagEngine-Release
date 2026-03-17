@@ -57,6 +57,36 @@ namespace Physics {
         const std::vector<FluidParticle>& GetParticles() const { return m_Particles; }
         
         /**
+         * @brief Get particle count
+         */
+        int GetParticleCount() const { return static_cast<int>(m_Particles.size()); }
+        
+        /**
+         * @brief Get particle positions
+         */
+        std::vector<glm::vec3> GetPositions() const {
+            std::vector<glm::vec3> positions;
+            positions.reserve(m_Particles.size());
+            for (const auto& p : m_Particles) {
+                positions.push_back(p.Position);
+            }
+            return positions;
+        }
+        
+        /**
+         * @brief Initialize a block of particles (ported from old_code/src/sph_water.cpp)
+         */
+        void InitBlock(int nx, int ny, int nz, float spacing, const glm::vec3& origin) {
+            Clear();
+            for (int iz = 0; iz < nz; ++iz)
+            for (int iy = 0; iy < ny; ++iy)
+            for (int ix = 0; ix < nx; ++ix) {
+                glm::vec3 pos = origin + glm::vec3(ix * spacing, iy * spacing, iz * spacing);
+                AddParticle(pos);
+            }
+        }
+        
+        /**
          * @brief Simulation parameters
          */
         float ParticleMass = 1.0f;

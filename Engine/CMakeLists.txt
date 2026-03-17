@@ -1,6 +1,7 @@
 # Collect all engine source files
 file(GLOB_RECURSE ENGINE_SOURCES
     "Assets/*.cpp"
+    "Build/*.cpp"
     "Core/*.cpp"
     "Graphics/*.cpp"
     "Physics/*.cpp"
@@ -18,6 +19,7 @@ file(GLOB_RECURSE ENGINE_SOURCES
 
 file(GLOB_RECURSE ENGINE_HEADERS
     "Assets/*.hpp"
+    "Build/*.hpp"
     "Core/*.hpp"
     "Graphics/*.hpp"
     "Physics/*.hpp"
@@ -51,6 +53,12 @@ target_include_directories(GameEngine
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# GLM configuration: must match test binary to avoid calling-convention ABI mismatch
+# GLM_FORCE_CTOR_INIT makes glm types non-trivially-copyable (user-provided copy ctor),
+# which changes glm::vec3/quat/etc. return convention from XMM registers to sret.
+# Both the library and any consumer (Tests) must use the same setting.
+target_compile_definitions(GameEngine PUBLIC GLM_FORCE_CTOR_INIT)
 
 # Link dependencies
 target_link_libraries(GameEngine

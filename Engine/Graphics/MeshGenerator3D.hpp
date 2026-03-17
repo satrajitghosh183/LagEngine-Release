@@ -37,5 +37,30 @@ namespace GameEngine {
          * @brief Generate capsule mesh
          */
         static Ref<Mesh3D> CreateCapsule(float radius = 0.5f, float height = 2.0f, int segments = 32, int rings = 8);
+        
+        /**
+         * @brief Generate cone mesh
+         */
+        static Ref<Mesh3D> CreateCone(float radius = 0.5f, float height = 1.0f, int segments = 32);
+        
+        /**
+         * @brief Generate torus mesh (donut shape)
+         */
+        static Ref<Mesh3D> CreateTorus(float majorRadius = 1.0f, float minorRadius = 0.3f, int majorSegments = 32, int minorSegments = 16);
+        
+        /**
+         * @brief Generate quad mesh (single face plane)
+         */
+        static Ref<Mesh3D> CreateQuad(float width = 1.0f, float height = 1.0f);
+        
+        /**
+         * @brief Generate UV sphere with improved topology
+         */
+        static Ref<Mesh3D> CreateUVSphere(float radius = 1.0f, int latitudes = 16, int longitudes = 32);
+        
+        /**
+         * @brief Generate icosphere (geodesic sphere)
+         */
+        static Ref<Mesh3D> CreateIcoSphere(float radius = 1.0f, int subdivisions = 2);
     };
 }

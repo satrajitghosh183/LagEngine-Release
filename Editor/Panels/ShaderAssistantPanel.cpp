@@ -17,7 +17,9 @@ namespace GameEngine {
     }
 
     void ShaderAssistantPanel::OnImGuiRender() {
-        ImGui::Begin("Shader Assistant");
+        if (!m_IsOpen) return;
+        
+        ImGui::Begin("Shader Assistant", &m_IsOpen);
 
         // Connection settings bar
         RenderConnectionStatus();

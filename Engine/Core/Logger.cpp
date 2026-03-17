@@ -25,13 +25,14 @@ namespace GameEngine {
     }
 
     void Logger::Shutdown() {
-        if (s_LogFile.is_open()) {
-            GE_CORE_INFO("Logger shutting down");
-            s_LogFile.close();
-        }
+        // Clear callbacks FIRST so no callback fires with stale references
         {
             std::lock_guard<std::mutex> lock(s_Mutex);
             s_Callbacks.clear();
+        }
+        if (s_LogFile.is_open()) {
+            GE_CORE_INFO("Logger shutting down");
+            s_LogFile.close();
         }
     }
     

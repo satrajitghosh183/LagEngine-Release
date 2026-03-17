@@ -18,6 +18,7 @@ namespace Physics {
         
         void Prepare(float deltaTime) override;
         void Solve() override;
+        void SolvePosition() override;
         
         RigidBody* GetBodyA() const override { return m_BodyA; }
         RigidBody* GetBodyB() const override { return m_BodyB; }

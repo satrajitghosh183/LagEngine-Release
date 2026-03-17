@@ -116,6 +116,7 @@ namespace GameEngine {
             RenderComponentWindow(&m_SpriteAnimatorWindow, m_SelectedEntity);
         }
 
+
         ImGui::Separator();
 
         // Add Component button

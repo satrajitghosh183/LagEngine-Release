@@ -133,12 +133,53 @@ conan/
 # ===================
 # Project-specific
 # ===================
-# Old/archived code
-
 older-builds/
 
-# Demo/experiment directories
-RL_Demo/
+# ImGui state
+imgui.ini
+editor_layout.ini
+
+# Scratch notes
+VIEWPORT_PANEL_CPP_EDITS.txt
+
+# QoDo AI
+.qodo/
+
+# Cursor AI
+.cursor/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+*.egg
+
+# RL_Backend build artifacts
+RL_Backend/build/
+RL_Backend/bin/
+RL_Backend/lib/
+RL_Backend/_deps/
+RL_Backend/CMakeFiles/
+RL_Backend/Makefile
+RL_Backend/cmake_install.cmake
+RL_Backend/CTestTestfile.cmake
+RL_Backend/compile_commands.json
+RL_Backend/runs/
+RL_Backend/benchmark*.json
+RL_Backend/rl/build/
+RL_Backend/rl/runs/
+RL_Backend/rl/__pycache__/
+RL_Backend/rl/*.so
+RL_Backend/rl/my_graphs/
+RL_Backend/rl/tensorboard_export/
+RL_Backend/rl/.venv/
+
+# Live-working-demos build artifacts
+Live-working-demos/**/build/
+Live-working-demos/**/__pycache__/
+
+# Compiled shared objects
+*.so
 
 # Asset metadata (auto-generated)
 *.meta

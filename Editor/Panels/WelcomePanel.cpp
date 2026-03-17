@@ -11,10 +11,11 @@ namespace GameEngine {
         ImGui::SetNextWindowSize(ImVec2(480, 360), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24, 24));
         if (ImGui::Begin("Welcome to GameEngine", &m_Visible, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
-            ImGui::TextWrapped("Create a new project from a template, open an existing project, or open a scene to get started.");
+            ImGui::TextWrapped("Create a new scene, open an existing project or scene, or start from a template.");
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
+            if (ImGui::Button("New Empty Scene", ImVec2(-1, 0)) && m_OnNewScene) m_OnNewScene();
             if (ImGui::Button("New Project from Template...", ImVec2(-1, 0)) && m_OnNewProject) m_OnNewProject();
             if (ImGui::Button("Open Project...", ImVec2(-1, 0)) && m_OnOpenProject) m_OnOpenProject();
             if (ImGui::Button("Open Scene...", ImVec2(-1, 0)) && m_OnOpenScene) m_OnOpenScene();

@@ -17,6 +17,11 @@ namespace GameEngine {
         void OnImGuiRender();
 
         void SetShaderContext(const ShaderContext& ctx) { m_Context = ctx; }
+        
+        // Visibility control (like other panels)
+        void Toggle() { m_IsOpen = !m_IsOpen; }
+        void SetOpen(bool open) { m_IsOpen = open; }
+        bool IsOpen() const { return m_IsOpen; }
 
     private:
         struct ChatEntry {
@@ -54,6 +59,9 @@ namespace GameEngine {
         OllamaConfig m_Config;
         char m_HostBuffer[256] = "localhost";
         int m_Port = 11434;
+        
+        // Visibility
+        bool m_IsOpen = true;
     };
 
 }

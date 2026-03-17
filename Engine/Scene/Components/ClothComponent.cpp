@@ -138,9 +138,9 @@ namespace GameEngine {
     void ClothComponent::OnFixedUpdate(float fixedDeltaTime) {
         if (!m_ClothBody || !IsSimulating) return;
         
-        // Get entity transform via Owner pointer (set by Scene)
-        if (Owner && Owner->HasComponent<TransformComponent>()) {
-            auto& transform = Owner->GetComponent<TransformComponent>();
+        // Get entity transform via GetOwnerEntity() pointer (set by Scene)
+        if (GetOwnerEntity() && GetOwnerEntity().HasComponent<TransformComponent>()) {
+            auto& transform = GetOwnerEntity().GetComponent<TransformComponent>();
             // Position offset could be applied here
         }
         

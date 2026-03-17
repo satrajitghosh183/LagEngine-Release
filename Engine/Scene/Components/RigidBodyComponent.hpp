@@ -65,6 +65,7 @@ namespace GameEngine {
         float AngularDamping = 0.1f;
         bool UseGravity = true;
         bool IsKinematic = false;
+        float Restitution = 0.3f;  // Bounciness (0=no bounce, 1=fully elastic)
         glm::vec3 LinearVelocity = glm::vec3(0.0f);
         glm::vec3 AngularVelocity = glm::vec3(0.0f);
         

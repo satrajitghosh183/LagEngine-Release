@@ -29,6 +29,7 @@ target_link_libraries(imgui PUBLIC glfw)
 # nlohmann_json (header-only)
 add_library(nlohmann_json INTERFACE)
 target_include_directories(nlohmann_json INTERFACE nlohmann_json/include)
+add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
 
 # stb_image
 add_library(stb_image INTERFACE)

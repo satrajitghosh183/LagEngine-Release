@@ -118,4 +118,23 @@ namespace Physics {
         m_BodyB->ApplyAngularImpulse(angularLambda);
     }
 
+    void FixedJoint::SolvePosition() {
+        if (!Enabled) return;
+
+        // Linear anchor position correction
+        glm::vec3 worldAnchorA = m_BodyA->GetPosition() + m_BodyA->GetRotation() * m_AnchorA;
+        glm::vec3 worldAnchorB = m_BodyB->GetPosition() + m_BodyB->GetRotation() * m_AnchorB;
+        glm::vec3 posError = worldAnchorB - worldAnchorA;
+
+        float invMassA = m_BodyA->GetInverseMass();
+        float invMassB = m_BodyB->GetInverseMass();
+        float totalInvMass = invMassA + invMassB;
+        if (totalInvMass > 0.0001f) {
+            const float correctionScale = 0.5f;
+            glm::vec3 correction = posError * correctionScale;
+            m_BodyA->SetPosition(m_BodyA->GetPosition() + correction * (invMassA / totalInvMass));
+            m_BodyB->SetPosition(m_BodyB->GetPosition() - correction * (invMassB / totalInvMass));
+        }
+    }
+
 }}

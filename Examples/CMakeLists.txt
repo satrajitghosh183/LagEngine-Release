@@ -78,6 +78,54 @@ target_include_directories(WickedStyleTemplate PRIVATE
 )
 target_compile_definitions(WickedStyleTemplate PRIVATE GAMEENGINE_INCLUDE_PATH="${CMAKE_SOURCE_DIR}/Engine")
 
+# -----------------------------------------------------------------------
+# Examples from old_code/ migration (Option B — physics 1:1, thin wrapper)
+# -----------------------------------------------------------------------
+
+# Example 07: 2D Physics Demo  (old_code/src/main2D.cpp)
+# Cloth2D + Cannon2D + Ball2D with Verlet integration — sf::Vector2f → glm::vec2
+add_executable(Physics2DDemo
+    07_Physics2DDemo/Physics2DDemoApp.cpp
+)
+target_link_libraries(Physics2DDemo PRIVATE GameEngine imgui)
+target_include_directories(Physics2DDemo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${ENGINE_INCLUDE_DIR}
+)
+
+# Example 08: HXPBD Cloth Physics  (old_code/feather/)
+# XPBD velocity/constraint/position update loop 1:1 from HXPbdSolver::solve()
+add_executable(HXPBDPhysics
+    08_HXPBDPhysics/HXPBDDemoApp.cpp
+)
+target_link_libraries(HXPBDPhysics PRIVATE GameEngine imgui)
+target_include_directories(HXPBDPhysics PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${ENGINE_INCLUDE_DIR}
+)
+
+# Example 09: Flag Simulation  (old_code/cloth-simulation/src/flag.cpp)
+# Spring-mass cloth: hookForce / brakeForce / repulseForce / Flag::update() 1:1
+add_executable(FlagSimulation
+    09_FlagSimulation/FlagSimulationApp.cpp
+)
+target_link_libraries(FlagSimulation PRIVATE GameEngine imgui)
+target_include_directories(FlagSimulation PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${ENGINE_INCLUDE_DIR}
+)
+
+# Example 10: Legacy Particle System  (old_code/particle-sim/)
+# Gravity + friction + floor-bounce + inter-particle collision 1:1 from Source.cpp
+add_executable(LegacyParticles
+    10_LegacyParticles/LegacyParticleDemoApp.cpp
+)
+target_link_libraries(LegacyParticles PRIVATE GameEngine imgui)
+target_include_directories(LegacyParticles PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${ENGINE_INCLUDE_DIR}
+)
+
 # Set output directory
 set_target_properties(
     HelloTriangle
@@ -87,6 +135,10 @@ set_target_properties(
     FluidSimulation
     RobotArm
     WickedStyleTemplate
+    Physics2DDemo
+    HXPBDPhysics
+    FlagSimulation
+    LegacyParticles
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
@@ -100,5 +152,9 @@ install(TARGETS
     FluidSimulation
     RobotArm
     WickedStyleTemplate
+    Physics2DDemo
+    HXPBDPhysics
+    FlagSimulation
+    LegacyParticles
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

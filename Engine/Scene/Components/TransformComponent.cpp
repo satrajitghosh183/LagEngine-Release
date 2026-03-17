@@ -59,8 +59,8 @@ namespace GameEngine {
     glm::mat4 TransformComponent::GetWorldTransform() const {
         glm::mat4 localTransform = GetLocalTransform();
         
-        if (Owner && Owner->HasParent()) {
-            Entity parent = Owner->GetParent();
+        if (GetOwnerEntity() && GetOwnerEntity().HasParent()) {
+            Entity parent = GetOwnerEntity().GetParent();
             if (parent.HasComponent<TransformComponent>()) {
                 auto& parentTransform = parent.GetComponent<TransformComponent>();
                 return parentTransform.GetWorldTransform() * localTransform;
@@ -76,8 +76,8 @@ namespace GameEngine {
     }
 
     glm::quat TransformComponent::GetWorldRotation() const {
-        if (Owner && Owner->HasParent()) {
-            Entity parent = Owner->GetParent();
+        if (GetOwnerEntity() && GetOwnerEntity().HasParent()) {
+            Entity parent = GetOwnerEntity().GetParent();
             if (parent.HasComponent<TransformComponent>()) {
                 auto& parentTransform = parent.GetComponent<TransformComponent>();
                 return parentTransform.GetWorldRotation() * Rotation;
@@ -88,8 +88,8 @@ namespace GameEngine {
     }
 
     glm::vec3 TransformComponent::GetWorldScale() const {
-        if (Owner && Owner->HasParent()) {
-            Entity parent = Owner->GetParent();
+        if (GetOwnerEntity() && GetOwnerEntity().HasParent()) {
+            Entity parent = GetOwnerEntity().GetParent();
             if (parent.HasComponent<TransformComponent>()) {
                 auto& parentTransform = parent.GetComponent<TransformComponent>();
                 return parentTransform.GetWorldScale() * Scale;
@@ -100,8 +100,8 @@ namespace GameEngine {
     }
 
     void TransformComponent::SetWorldPosition(const glm::vec3& position) {
-        if (Owner && Owner->HasParent()) {
-            Entity parent = Owner->GetParent();
+        if (GetOwnerEntity() && GetOwnerEntity().HasParent()) {
+            Entity parent = GetOwnerEntity().GetParent();
             if (parent.HasComponent<TransformComponent>()) {
                 auto& parentTransform = parent.GetComponent<TransformComponent>();
                 glm::mat4 parentWorld = parentTransform.GetWorldTransform();
@@ -171,8 +171,8 @@ namespace GameEngine {
         m_Dirty = true;
         
         // Mark children as dirty too
-        if (Owner) {
-            for (auto child : Owner->GetChildren()) {
+        if (GetOwnerEntity()) {
+            for (auto child : GetOwnerEntity().GetChildren()) {
                 if (child.HasComponent<TransformComponent>()) {
                     child.GetComponent<TransformComponent>().SetDirty();
                 }

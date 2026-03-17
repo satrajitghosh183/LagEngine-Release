@@ -26,6 +26,7 @@ namespace GameEngine {
     class GBuffer {
     public:
         GBuffer() = default;
+        GBuffer(int width, int height) : m_Width(width), m_Height(height) {}
         ~GBuffer();
 
         void Init(int width, int height);

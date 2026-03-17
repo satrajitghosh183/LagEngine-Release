@@ -6,7 +6,7 @@ This guide walks you from zero to a running scene in under 30 minutes.
 
 ### Option 1: Pre-built release (recommended)
 
-1. Go to the [Releases](https://github.com/your-org/GameEngine/releases) page.
+1. Go to the [Releases](https://github.com/satrajitghosh183/LAGEngine/releases) page.
 2. Download the installer or ZIP for your platform:
    - **Windows:** `GameEngine-x.x.x-Windows.exe` (NSIS installer) or `.zip` for portable.
    - **macOS:** `GameEngine-x.x.x-macOS.dmg` or `.zip`.
@@ -20,7 +20,7 @@ See the root [README.md](../../README.md) for prerequisites (CMake, compiler, Op
 
 ```bash
 # Clone (with submodules)
-git clone --recursive https://github.com/your-org/GameEngine.git
+git clone --recursive https://github.com/satrajitghosh183/LAGEngine.git
 cd GameEngine
 
 # Configure and build

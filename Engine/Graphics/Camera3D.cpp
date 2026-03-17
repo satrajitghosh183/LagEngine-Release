@@ -52,6 +52,24 @@ namespace GameEngine {
         RecalculateViewMatrix();
     }
 
+    void Camera3D::SetFromWorldTransform(const glm::mat4& worldTransform) {
+        // Extract position from world transform
+        m_Position = glm::vec3(worldTransform[3]);
+        
+        // Extract rotation basis vectors from the world transform
+        // Entity convention: -Z is forward, +Y is up, +X is right
+        m_Right   = glm::normalize(glm::vec3(worldTransform[0]));
+        m_Up      = glm::normalize(glm::vec3(worldTransform[1]));
+        m_Forward = -glm::normalize(glm::vec3(worldTransform[2])); // Negate Z for -Z forward
+        
+        // Calculate euler angles from the forward vector for consistency
+        m_Pitch = glm::degrees(asin(glm::clamp(m_Forward.y, -1.0f, 1.0f)));
+        m_Yaw = glm::degrees(atan2(m_Forward.z, m_Forward.x));
+        
+        // Build view matrix directly: inverse of the world transform's rotation + translation
+        m_ViewMatrix = glm::lookAt(m_Position, m_Position + m_Forward, m_Up);
+    }
+
     void Camera3D::Rotate(float deltaPitch, float deltaYaw, float deltaRoll) {
         m_Pitch = std::clamp(m_Pitch + deltaPitch, -89.0f, 89.0f);
         m_Yaw += deltaYaw;

@@ -9,9 +9,11 @@
 #include "Components/ClothComponent.hpp"
 #include "Components/JointComponent.hpp"
 #include "Components/FluidEmitterComponent.hpp"
+#include "Components/GPUParticleComponent.hpp"
 #include "Components/ScriptComponent.hpp"
 #include "../Core/Logger.hpp"
 #include "../Graphics/Renderer3D.hpp"
+#include "../Physics/Fluids/FluidRenderer.hpp"
 
 namespace GameEngine {
 
@@ -27,15 +29,12 @@ namespace GameEngine {
     }
 
     Scene::~Scene() {
-        OnStop();
-        
-        // Destroy all entities
-        for (auto& [uuid, entityData] : m_Entities) {
-            for (auto& [type, component] : entityData.Components) {
-                component->OnDestroy();
-            }
+        // Only call OnStop if still running (prevents double-stop)
+        if (m_IsRunning) {
+            OnStop();
         }
         
+        // Clear entities (OnDestroy already called in OnStop)
         m_Entities.clear();
         
         GE_CORE_INFO("Scene '{0}' destroyed", m_Name);
@@ -138,6 +137,44 @@ namespace GameEngine {
         
         // End scene
         Renderer3D::EndScene();
+
+        // -----------------------------------------------------------------------
+        // SPH fluid particle rendering — sphere impostors (ported from old_code)
+        // -----------------------------------------------------------------------
+        {
+            static Physics::FluidRenderer s_FluidRenderer;
+            static bool s_FluidRendererInit = false;
+            if (!s_FluidRendererInit) {
+                s_FluidRenderer.Init();
+                s_FluidRendererInit = true;
+            }
+
+            if (s_FluidRenderer.IsReady()) {
+                glm::mat4 view = camera->GetViewMatrix();
+                glm::mat4 proj = camera->GetProjectionMatrix();
+                for (auto& entity : GetEntitiesWith<FluidEmitterComponent>()) {
+                    if (!entity.IsActive()) continue;
+                    auto& fe = entity.GetComponent<FluidEmitterComponent>();
+                    if (!fe.Enabled || !fe.SimulationEnabled) continue;
+                    auto positions = fe.GetParticlePositions();
+                    if (!positions.empty())
+                        s_FluidRenderer.Render(positions, view, proj, fe.ParticleSize);
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // GPU particle rendering (compute-shader particles)
+        // -----------------------------------------------------------------------
+        {
+            glm::mat4 viewProj = camera->GetViewProjectionMatrix();
+            for (auto& entity : GetEntitiesWith<GPUParticleComponent>()) {
+                if (!entity.IsActive()) continue;
+                auto& gpc = entity.GetComponent<GPUParticleComponent>();
+                if (gpc.Enabled && gpc.GetParticleSystem())
+                    gpc.RenderParticles(viewProj);
+            }
+        }
     }
 
     void Scene::OnStop() {

@@ -91,6 +91,12 @@ namespace GameEngine {
         void SetRotation(float pitch, float yaw, float roll = 0.0f);
         
         /**
+         * @brief Set camera transform from world matrix (position + rotation)
+         * This properly handles the transform's rotation convention (-Z forward)
+         */
+        void SetFromWorldTransform(const glm::mat4& worldTransform);
+        
+        /**
          * @brief Rotate camera
          */
         void Rotate(float deltaPitch, float deltaYaw, float deltaRoll = 0.0f);

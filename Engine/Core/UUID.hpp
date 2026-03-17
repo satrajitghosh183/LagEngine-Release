@@ -11,7 +11,7 @@ namespace GameEngine {
 
     /**
      * @brief Universally Unique Identifier
-     * 
+     *
      * 64-bit UUID for entity and resource identification
      * Thread-safe generation using atomic operations
      */
@@ -20,19 +20,19 @@ namespace GameEngine {
         UUID();
         UUID(uint64_t uuid);
         UUID(const UUID&) = default;
-        
+
         operator uint64_t() const { return m_UUID; }
-        
+
         std::string ToString() const;
-        
-        bool operator==(const UUID& other) const {
-            return m_UUID == other.m_UUID;
-        }
-        
-        bool operator!=(const UUID& other) const {
-            return !(*this == other);
-        }
-        
+
+        bool operator==(const UUID& other)  const { return m_UUID == other.m_UUID; }
+        bool operator!=(const UUID& other)  const { return m_UUID != other.m_UUID; }
+        bool operator==(uint64_t other)     const { return m_UUID == other; }
+        bool operator!=(uint64_t other)     const { return m_UUID != other; }
+
+        friend bool operator==(uint64_t lhs, const UUID& rhs) { return lhs == rhs.m_UUID; }
+        friend bool operator!=(uint64_t lhs, const UUID& rhs) { return lhs != rhs.m_UUID; }
+
     private:
         uint64_t m_UUID;
     };
@@ -47,4 +47,3 @@ namespace std {
         }
     };
 }
-

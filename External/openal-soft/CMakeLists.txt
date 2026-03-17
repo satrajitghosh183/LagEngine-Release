@@ -1385,7 +1385,7 @@ else()
         # FIXME: This doesn't put a dependency on the version script. Changing
         # the version script will not cause a relink as it should.
         set_property(TARGET ${IMPL_TARGET} APPEND_STRING PROPERTY
-            LINK_FLAGS " -Wl,--version-script=${OpenAL_SOURCE_DIR}/libopenal.version")
+            LINK_FLAGS " -Wl,--version-script=\"${OpenAL_SOURCE_DIR}/libopenal.version\"")
     endif()
 
     if(APPLE AND ALSOFT_OSX_FRAMEWORK)

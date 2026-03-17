@@ -46,5 +46,7 @@ set_target_properties(GameEngineTests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
+target_compile_definitions(GameEngineTests PRIVATE GLM_FORCE_CTOR_INIT)
+
 include(GoogleTest)
 gtest_discover_tests(GameEngineTests)

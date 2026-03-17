@@ -1,0 +1,625 @@
+{% extends "base.html" %}
+
+{% block title %}Avatar Creation Pipeline - Webcam Capture{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Webcam Capture</h2>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h3 class="card-title">Setup</h3>
+        <form id="setup-form">
+            <div class="mb-3">
+                <label for="subject-id" class="form-label">Subject ID (optional)</label>
+                <input type="text" class="form-control" id="subject-id" placeholder="e.g., your_name">
+                <div class="form-text">If left blank, a unique ID will be generated for you.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Capture Mode</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="capture-mode" id="mode-all" value="all" checked>
+                    <label class="form-check-label" for="mode-all">
+                        Complete Session (Poses + Actions)
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="capture-mode" id="mode-poses" value="poses">
+                    <label class="form-check-label" for="mode-poses">
+                        Poses Only
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="capture-mode" id="mode-actions" value="actions">
+                    <label class="form-check-label" for="mode-actions">
+                        Actions Only
+                    </label>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary" id="start-btn">Start Capture Session</button>
+        </form>
+    </div>
+</div>
+
+<div class="card mb-4 d-none" id="capture-container">
+    <div class="card-body">
+        <h3 class="card-title" id="capture-title">Pose Capture</h3>
+        
+        <div class="instructions" id="capture-instructions">
+            Please position yourself in front of the camera. The capture process will guide you through different poses.
+        </div>
+        
+        <div class="camera-container mb-4">
+            <video id="video" width="640" height="480" autoplay></video>
+            <div class="camera-overlay" id="camera-overlay">
+                <div id="overlay-text">Getting ready...</div>
+                <div id="countdown" class="display-1 d-none"></div>
+            </div>
+        </div>
+        
+        <div class="d-flex justify-content-center">
+            <button class="btn btn-lg btn-primary" id="capture-btn">Capture Pose</button>
+            <button class="btn btn-lg btn-success ms-2 d-none" id="next-btn">Next Pose</button>
+            <button class="btn btn-lg btn-danger ms-2 d-none" id="cancel-btn">Cancel</button>
+            <button class="btn btn-lg btn-warning ms-2 d-none" id="finish-btn">Finish & Process</button>
+        </div>
+
+        <div class="mt-3 text-center text-muted" id="pose-status-text">
+            Current pose: <strong>Front</strong> (0 images captured)
+        </div>
+        
+        <div class="progress progress-container d-none mt-4">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+        </div>
+        
+        <div class="row mt-4" id="preview-container">
+            <!-- Preview images will be displayed here -->
+        </div>
+    </div>
+</div>
+
+<div class="card d-none" id="completion-card">
+    <div class="card-body text-center">
+        <h3 class="card-title mb-4">Capture Complete!</h3>
+        <p class="lead">Your data has been collected successfully.</p>
+        <p>Now processing your data to extract features...</p>
+        <div class="spinner-border text-primary my-4" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="text-muted">This may take a few minutes. Please don't close the browser.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Global variables
+    let video;
+    let stream;
+    let subjectId;
+    let captureMode;
+    let currentPose = 0;
+    let poseCounts = {};
+    let poseImages = {};
+    let captureCount = 0;
+    const poses = ['front', 'left', 'right', 'up', 'down'];
+    const poseInstructions = {
+        'front': 'Look straight at the camera',
+        'left': 'Turn LEFT and look at the camera',
+        'right': 'Turn RIGHT and look at the camera',
+        'up': 'Look UP towards the ceiling',
+        'down': 'Look DOWN towards the floor'
+    };
+    const actions = ['idle', 'walk', 'run'];
+    const actionInstructions = {
+        'idle': 'STAND STILL facing the camera',
+        'walk': 'WALK IN PLACE, facing the camera',
+        'run': 'RUN IN PLACE, facing the camera'
+    };
+    let currentAction = 0;
+    let isRecording = false;
+    let mediaRecorder;
+    let recordedChunks = [];
+    
+    // DOM elements
+    const setupForm = document.getElementById('setup-form');
+    const captureContainer = document.getElementById('capture-container');
+    const captureTitle = document.getElementById('capture-title');
+    const captureInstructions = document.getElementById('capture-instructions');
+    const videoElement = document.getElementById('video');
+    const cameraOverlay = document.getElementById('camera-overlay');
+    const overlayText = document.getElementById('overlay-text');
+    const countdownElement = document.getElementById('countdown');
+    const captureBtn = document.getElementById('capture-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const finishBtn = document.getElementById('finish-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const progressContainer = document.querySelector('.progress-container');
+    const progressBar = document.querySelector('.progress-bar');
+    const previewContainer = document.getElementById('preview-container');
+    const completionCard = document.getElementById('completion-card');
+    const poseStatusText = document.getElementById('pose-status-text');
+    
+    // Setup form submission
+    setupForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        subjectId = document.getElementById('subject-id').value || `subject_${Date.now()}`;
+        captureMode = document.querySelector('input[name="capture-mode"]:checked').value;
+        
+        startCaptureSession();
+    });
+    
+    // Start capture session
+    function startCaptureSession() {
+        // Initialize pose counts and images
+        for (const pose of poses) {
+            poseCounts[pose] = 0;
+            poseImages[pose] = [];
+        }
+        
+        // Request camera access
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            .then(function(mediaStream) {
+                stream = mediaStream;
+                videoElement.srcObject = stream;
+                
+                // Hide setup form and show capture container
+                document.querySelector('.card').classList.add('d-none');
+                captureContainer.classList.remove('d-none');
+                
+                // Set initial capture mode
+                if (captureMode === 'actions') {
+                    setupActionCapture();
+                } else {
+                    // Default to pose capture first
+                    setupPoseCapture();
+                }
+            })
+            .catch(function(err) {
+                alert('Error accessing camera: ' + err.message);
+                console.error('Error accessing camera:', err);
+            });
+    }
+    
+    // Setup pose capture UI
+    function setupPoseCapture() {
+        captureTitle.textContent = 'Pose Capture';
+        currentPose = 0;
+        updatePoseUI();
+        
+        captureBtn.textContent = 'Capture Pose';
+        captureBtn.classList.remove('d-none');
+        nextBtn.classList.add('d-none');
+        finishBtn.classList.add('d-none');
+        cancelBtn.classList.remove('d-none');
+        
+        // Reset preview container
+        previewContainer.innerHTML = '';
+        for (const pose of poses) {
+            const col = document.createElement('div');
+            col.className = 'col-md-2 text-center pose-container';
+            col.innerHTML = `
+                <h5>${pose.toUpperCase()}</h5>
+                <div class="preview-container" id="preview-${pose}">
+                    <div class="preview-placeholder" style="height: 120px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+                        <span class="text-muted">Not captured</span>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <span class="badge bg-secondary" id="count-${pose}">0 images</span>
+                </div>
+            `;
+            previewContainer.appendChild(col);
+        }
+
+        // Check if any images have been captured to show the finish button
+        updateFinishButtonVisibility();
+    }
+    
+    // Update pose capture UI for current pose
+    function updatePoseUI() {
+        if (currentPose >= poses.length) {
+            // All poses captured, move to action capture or finish
+            if (captureMode === 'all') {
+                setupActionCapture();
+            } else {
+                finishCapture();
+            }
+            return;
+        }
+        
+        const pose = poses[currentPose];
+        overlayText.textContent = poseInstructions[pose];
+        captureBtn.textContent = `Capture ${pose.toUpperCase()} Pose`;
+
+        // Update pose status text
+        poseStatusText.innerHTML = `Current pose: <strong>${pose.toUpperCase()}</strong> (${poseCounts[pose]} images captured)`;
+        
+        // Show Next button if we have at least one image for this pose
+        if (poseCounts[pose] > 0) {
+            nextBtn.textContent = `Next Pose`;
+            nextBtn.classList.remove('d-none');
+        } else {
+            nextBtn.classList.add('d-none');
+        }
+
+        // Check if any images have been captured to show the finish button
+        updateFinishButtonVisibility();
+    }
+
+    // Update the finish button visibility
+    function updateFinishButtonVisibility() {
+        // Check if any images have been captured across all poses
+        const totalCaptured = Object.values(poseCounts).reduce((sum, count) => sum + count, 0);
+        
+        if (totalCaptured > 0) {
+            finishBtn.classList.remove('d-none');
+        } else {
+            finishBtn.classList.add('d-none');
+        }
+    }
+    
+    // Setup action capture UI
+    function setupActionCapture() {
+        captureTitle.textContent = 'Action Capture';
+        currentAction = 0;
+        updateActionUI();
+        
+        // Update pose status text
+        poseStatusText.innerHTML = 'Ready to capture actions';
+
+        // Clear pose preview and setup action preview
+        previewContainer.innerHTML = '';
+        for (const action of actions) {
+            const col = document.createElement('div');
+            col.className = 'col-md-4 text-center action-container';
+            col.innerHTML = `
+                <h5>${action.toUpperCase()}</h5>
+                <div class="preview-placeholder" id="preview-${action}" style="height: 120px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+                    <span class="text-muted">Not recorded</span>
+                </div>
+            `;
+            previewContainer.appendChild(col);
+        }
+
+        // Hide the finish button in action mode since actions are mandatory
+        finishBtn.classList.add('d-none');
+    }
+    
+    // Update action capture UI for current action
+    function updateActionUI() {
+        if (currentAction >= actions.length) {
+            // All actions captured, finish
+            finishCapture();
+            return;
+        }
+        
+        const action = actions[currentAction];
+        overlayText.textContent = actionInstructions[action];
+        
+        // Update pose status text
+        poseStatusText.innerHTML = `Current action: <strong>${action.toUpperCase()}</strong>`;
+        
+        if (!isRecording) {
+            captureBtn.textContent = `Record ${action.toUpperCase()} Action`;
+            captureBtn.classList.remove('btn-danger');
+            captureBtn.classList.add('btn-primary');
+        } else {
+            captureBtn.textContent = 'Stop Recording';
+            captureBtn.classList.remove('btn-primary');
+            captureBtn.classList.add('btn-danger');
+        }
+    }
+    
+    // Capture button click handler
+    captureBtn.addEventListener('click', function() {
+        if (captureMode === 'actions' || (captureMode === 'all' && currentPose >= poses.length)) {
+            // Action capture
+            if (!isRecording) {
+                startActionRecording();
+            } else {
+                stopActionRecording();
+            }
+        } else {
+            // Pose capture
+            startPoseCapture();
+        }
+    });
+    
+    // Next button click handler
+    nextBtn.addEventListener('click', function() {
+        // Move to next pose
+        currentPose++;
+        updatePoseUI();
+    });
+
+    // Finish button click handler
+    finishBtn.addEventListener('click', function() {
+        // Check if any poses have been captured
+        const totalCaptured = Object.values(poseCounts).reduce((sum, count) => sum + count, 0);
+        
+        if (totalCaptured === 0) {
+            alert('Please capture at least one image before processing.');
+            return;
+        }
+        
+        if (confirm('Are you ready to finish capturing and start processing?')) {
+            finishCapture();
+        }
+    });
+    
+    // Cancel button click handler
+    cancelBtn.addEventListener('click', function() {
+        if (confirm('Are you sure you want to cancel the capture session?')) {
+            stopMediaTracks();
+            window.location.href = '/';
+        }
+    });
+    
+    // Start pose capture with countdown
+    function startPoseCapture() {
+        captureBtn.disabled = true;
+        nextBtn.disabled = true;
+        finishBtn.disabled = true;
+        cancelBtn.disabled = true;
+        countdownElement.classList.remove('d-none');
+        
+        // 3-second countdown
+        let count = 3;
+        countdownElement.textContent = count;
+        
+        const countdownInterval = setInterval(() => {
+            count--;
+            if (count > 0) {
+                countdownElement.textContent = count;
+            } else {
+                clearInterval(countdownInterval);
+                countdownElement.classList.add('d-none');
+                capturePoseImage();
+            }
+        }, 1000);
+    }
+    
+    // Capture pose image from video
+    function capturePoseImage() {
+        const canvas = document.createElement('canvas');
+        canvas.width = videoElement.videoWidth;
+        canvas.height = videoElement.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoElement, 0, 0);
+        
+        // Convert to blob
+        canvas.toBlob(function(blob) {
+            const pose = poses[currentPose];
+            
+            // Add to pose images array
+            if (!poseImages[pose]) {
+                poseImages[pose] = [];
+            }
+            poseImages[pose].push(blob);
+            
+            // Update counter
+            poseCounts[pose] = (poseCounts[pose] || 0) + 1;
+            document.getElementById(`count-${pose}`).textContent = `${poseCounts[pose]} image${poseCounts[pose] > 1 ? 's' : ''}`;
+            
+            // Update pose status text
+            poseStatusText.innerHTML = `Current pose: <strong>${pose.toUpperCase()}</strong> (${poseCounts[pose]} images captured)`;
+            
+            // Update preview
+            const previewElement = document.getElementById(`preview-${pose}`);
+            
+            // Create new image thumbnail
+            const imgWrapper = document.createElement('div');
+            imgWrapper.className = 'position-relative d-inline-block m-1';
+            
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(blob);
+            img.className = 'preview-image';
+            img.style.width = '100px';
+            img.style.height = '75px';
+            img.style.objectFit = 'cover';
+            img.style.borderRadius = '4px';
+            img.style.margin = '2px';
+            
+            imgWrapper.appendChild(img);
+            
+            // For the first image, clear the placeholder
+            if (poseCounts[pose] === 1) {
+                previewElement.innerHTML = '';
+            }
+            
+            previewElement.appendChild(imgWrapper);
+            
+            // Update progress
+            captureCount++;
+            updateProgress();
+            
+            // Re-enable buttons
+            captureBtn.disabled = false;
+            nextBtn.disabled = false;
+            finishBtn.disabled = false;
+            cancelBtn.disabled = false;
+            
+            // Show next button
+            nextBtn.textContent = `Next Pose`;
+            nextBtn.classList.remove('d-none');
+
+            // Show finish button
+            updateFinishButtonVisibility();
+        }, 'image/jpeg');
+    }
+    
+    // Start action recording
+    function startActionRecording() {
+        isRecording = true;
+        recordedChunks = [];
+        
+        // Setup media recorder
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        
+        mediaRecorder.ondataavailable = function(e) {
+            if (e.data.size > 0) {
+                recordedChunks.push(e.data);
+            }
+        };
+        
+        mediaRecorder.onstop = function() {
+            const action = actions[currentAction];
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            
+            // Update preview
+            const previewElement = document.getElementById(`preview-${action}`);
+            previewElement.innerHTML = '';
+            
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(blob);
+            video.className = 'preview-image';
+            video.controls = true;
+            video.muted = true;
+            previewElement.appendChild(video);
+            
+            // Update progress
+            captureCount++;
+            updateProgress();
+            
+            // Move to next action
+            currentAction++;
+            isRecording = false;
+            updateActionUI();
+            
+            // Re-enable button
+            captureBtn.disabled = false;
+            cancelBtn.disabled = false;
+        };
+        
+        // Start recording with a 10-second limit
+        mediaRecorder.start();
+        updateActionUI();
+        
+        // Record for 10 seconds
+        setTimeout(() => {
+            if (mediaRecorder.state === 'recording') {
+                stopActionRecording();
+            }
+        }, 10000);
+        
+        // Show recording indicator
+        overlayText.innerHTML = `<span class="text-danger">⚫ RECORDING</span> ${actionInstructions[actions[currentAction]]}`;
+    }
+    
+    // Stop action recording
+    function stopActionRecording() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            captureBtn.disabled = true;
+            cancelBtn.disabled = true;
+        }
+    }
+    
+    // Update progress bar
+    function updateProgress() {
+        const totalPoses = poses.length;
+        const totalActions = (captureMode === 'all' ? actions.length : 0);
+        const poseProgress = Math.min(currentPose + (poseCounts[poses[currentPose]] > 0 ? 0.5 : 0), totalPoses);
+        const actionProgress = (captureMode === 'all' && currentPose >= totalPoses) ? currentAction : 0;
+        
+        const progress = ((poseProgress / totalPoses) * (totalPoses / (totalPoses + totalActions)) + 
+                         (actionProgress / totalActions) * (totalActions / (totalPoses + totalActions))) * 100;
+        
+        progressContainer.classList.remove('d-none');
+        progressBar.style.width = `${progress}%`;
+        progressBar.textContent = `${Math.round(progress)}%`;
+    }
+    
+    // Finish capture session and start processing
+    function finishCapture() {
+        // Show completion card
+        captureContainer.classList.add('d-none');
+        completionCard.classList.remove('d-none');
+        
+        // Stop camera
+        stopMediaTracks();
+        
+        // Start server-side processing
+        startProcessing();
+    }
+    
+    // Stop all media tracks
+    function stopMediaTracks() {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+    }
+    
+    // // Start server-side processing
+    // function startProcessing() {
+    //     // Create form data with all captured media
+    //     const formData = new FormData();
+    //     formData.append('subject_id', subjectId);
+    //     formData.append('mode', captureMode);
+        
+    //     // Add pose images
+    //     for (const pose in poseImages) {
+    //         if (poseImages[pose].length > 0) {
+    //             poseImages[pose].forEach((blob, index) => {
+    //                 formData.append(`pose_${pose}`, blob, `${pose}_${index}.jpg`);
+    //             });
+    //         }
+    //     }
+        
+    //     // Send to server
+    //     fetch('/api/start-pipeline', {
+    //         method: 'POST',
+    //         body: formData
+    //     })
+    //     .then(response => response.json())
+    //     .then(data => {
+    //         // Redirect to processing page
+    //         window.location.href = `/processing?job_id=${data.job_id}&subject_id=${data.subject_id}`;
+    //     })
+    //     .catch(error => {
+    //         console.error('Error starting processing:', error);
+    //         alert('Error starting processing. Please try again.');
+    //     });
+    // }
+
+
+    // Start server-side processing
+// Start server-side processing
+function startProcessing() {
+    // Create form data with all captured media
+    const formData = new FormData();
+    formData.append('subject_id', subjectId);
+    formData.append('mode', captureMode);
+    
+    // Add pose images
+    for (const pose in poseImages) {
+        if (poseImages[pose].length > 0) {
+            poseImages[pose].forEach((blob, index) => {
+                formData.append(`pose_${pose}`, blob, `${pose}_${index}.jpg`);
+            });
+        }
+    }
+    
+    // Send to server
+    fetch('/api/upload-process', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Upload failed');
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Redirect to results page
+        window.location.href = `/results/${data.subject_id}`;
+    })
+    .catch(error => {
+        console.error('Error starting processing:', error);
+        alert('Error processing images: ' + error.message);
+        window.location.href = '/';
+    });
+}
+</script>
+{% endblock %}

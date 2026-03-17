@@ -15,6 +15,10 @@ namespace GameEngine {
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
 
+        // Use a dedicated layout file so the old imgui.ini (with all windows
+        // saved as floating) does not override the dock layout on startup.
+        io.IniFilename = "editor_layout.ini";
+
         // Enable docking and viewports (if available)
 #ifdef IMGUI_HAS_DOCK
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -231,7 +235,7 @@ namespace GameEngine {
         ImGui::PushMultiItemsWidths(3, ImGui::CalcItemWidth());
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{0, 0});
 
-        float lineHeight = GImGui->Font->FontSize + GImGui->Style.FramePadding.y * 2.0f;
+        float lineHeight = GImGui->FontSize + GImGui->Style.FramePadding.y * 2.0f;
         ImVec2 buttonSize = {lineHeight + 3.0f, lineHeight};
 
         // X

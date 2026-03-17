@@ -166,4 +166,50 @@ namespace Physics {
         return std::atan2(cross, dot);
     }
 
+    void HingeJoint::SolvePosition() {
+        if (!Enabled) return;
+
+        // Anchor position correction
+        glm::vec3 worldAnchorA = m_BodyA->GetPosition() + m_BodyA->GetRotation() * m_AnchorA;
+        glm::vec3 worldAnchorB = m_BodyB->GetPosition() + m_BodyB->GetRotation() * m_AnchorB;
+        glm::vec3 posError = worldAnchorB - worldAnchorA;
+
+        float invMassA = m_BodyA->GetInverseMass();
+        float invMassB = m_BodyB->GetInverseMass();
+        float totalInvMass = invMassA + invMassB;
+        if (totalInvMass > 0.0001f) {
+            glm::vec3 correction = posError * 0.5f;
+            m_BodyA->SetPosition(m_BodyA->GetPosition() + correction * (invMassA / totalInvMass));
+            m_BodyB->SetPosition(m_BodyB->GetPosition() - correction * (invMassB / totalInvMass));
+        }
+
+        // Angular limit correction
+        if (!UseLimits) return;
+
+        float angle = GetCurrentAngle();
+        float limitError = 0.0f;
+        if (angle > UpperLimit) {
+            limitError = angle - UpperLimit;
+        } else if (angle < LowerLimit) {
+            limitError = angle - LowerLimit;
+        } else {
+            return;
+        }
+
+        glm::vec3 worldAxisA = m_BodyA->GetRotation() * m_AxisA;
+        glm::mat3 invInertiaA = m_BodyA->GetInverseInertiaTensor();
+        glm::mat3 invInertiaB = m_BodyB->GetInverseInertiaTensor();
+        float invIA = glm::dot(worldAxisA, invInertiaA * worldAxisA);
+        float invIB = glm::dot(worldAxisA, invInertiaB * worldAxisA);
+        float totalInvI = invIA + invIB;
+        if (totalInvI < 0.0001f) return;
+
+        const float correctionScale = 0.5f;
+        float corrA = +limitError * correctionScale * (invIA / totalInvI);
+        float corrB = -limitError * correctionScale * (invIB / totalInvI);
+
+        m_BodyA->SetRotation(glm::normalize(glm::angleAxis(corrA, worldAxisA) * m_BodyA->GetRotation()));
+        m_BodyB->SetRotation(glm::normalize(glm::angleAxis(corrB, worldAxisA) * m_BodyB->GetRotation()));
+    }
+
 }}

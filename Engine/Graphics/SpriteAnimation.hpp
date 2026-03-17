@@ -21,6 +21,7 @@ namespace GameEngine {
         void SetLooping(bool loop) { m_Looping = loop; }
         bool IsPlaying() const { return m_Playing; }
         const SpriteFrame& GetCurrentFrame() const;
+        int GetCurrentFrameIndex() const { return m_CurrentFrame; }
         int GetFrameCount() const { return static_cast<int>(m_Frames.size()); }
 
     private:

@@ -536,6 +536,89 @@ namespace GameEngine {
             return 1;
         });
         
+        // ==================== Vector (OOP-style, with metatable) ====================
+        // Create VectorMT metatable
+        luaL_newmetatable(s_LuaState, "VectorMT");
+
+        // __index = VectorMT (enables v:method() call syntax)
+        lua_pushvalue(s_LuaState, -1);
+        lua_setfield(s_LuaState, -2, "__index");
+
+        // __add: v1 + v2
+        lua_pushcfunction(s_LuaState, [](lua_State* L) -> int {
+            glm::vec3 a = ToVec3(L, 1);
+            glm::vec3 b = ToVec3(L, 2);
+            glm::vec3 r = a + b;
+            lua_newtable(L);
+            lua_pushnumber(L, r.x); lua_setfield(L, -2, "x");
+            lua_pushnumber(L, r.y); lua_setfield(L, -2, "y");
+            lua_pushnumber(L, r.z); lua_setfield(L, -2, "z");
+            luaL_setmetatable(L, "VectorMT");
+            return 1;
+        });
+        lua_setfield(s_LuaState, -2, "__add");
+
+        // dot: v:dot(other)
+        lua_pushcfunction(s_LuaState, [](lua_State* L) -> int {
+            glm::vec3 a = ToVec3(L, 1);
+            glm::vec3 b = ToVec3(L, 2);
+            lua_pushnumber(L, glm::dot(a, b));
+            return 1;
+        });
+        lua_setfield(s_LuaState, -2, "dot");
+
+        // cross: v:cross(other)
+        lua_pushcfunction(s_LuaState, [](lua_State* L) -> int {
+            glm::vec3 a = ToVec3(L, 1);
+            glm::vec3 b = ToVec3(L, 2);
+            glm::vec3 r = glm::cross(a, b);
+            lua_newtable(L);
+            lua_pushnumber(L, r.x); lua_setfield(L, -2, "x");
+            lua_pushnumber(L, r.y); lua_setfield(L, -2, "y");
+            lua_pushnumber(L, r.z); lua_setfield(L, -2, "z");
+            luaL_setmetatable(L, "VectorMT");
+            return 1;
+        });
+        lua_setfield(s_LuaState, -2, "cross");
+
+        // length: v:length()
+        lua_pushcfunction(s_LuaState, [](lua_State* L) -> int {
+            glm::vec3 v = ToVec3(L, 1);
+            lua_pushnumber(L, glm::length(v));
+            return 1;
+        });
+        lua_setfield(s_LuaState, -2, "length");
+
+        // normalize: v:normalize()
+        lua_pushcfunction(s_LuaState, [](lua_State* L) -> int {
+            glm::vec3 v = ToVec3(L, 1);
+            float len = glm::length(v);
+            glm::vec3 r = (len > 0.0001f) ? v / len : glm::vec3(0.0f);
+            lua_newtable(L);
+            lua_pushnumber(L, r.x); lua_setfield(L, -2, "x");
+            lua_pushnumber(L, r.y); lua_setfield(L, -2, "y");
+            lua_pushnumber(L, r.z); lua_setfield(L, -2, "z");
+            luaL_setmetatable(L, "VectorMT");
+            return 1;
+        });
+        lua_setfield(s_LuaState, -2, "normalize");
+
+        lua_pop(s_LuaState, 1);  // pop VectorMT
+
+        // Vector constructor: Vector(x, y, z)
+        lua_pushcfunction(s_LuaState, [](lua_State* L) -> int {
+            float x = static_cast<float>(luaL_optnumber(L, 1, 0.0));
+            float y = static_cast<float>(luaL_optnumber(L, 2, 0.0));
+            float z = static_cast<float>(luaL_optnumber(L, 3, 0.0));
+            lua_newtable(L);
+            lua_pushnumber(L, x); lua_setfield(L, -2, "x");
+            lua_pushnumber(L, y); lua_setfield(L, -2, "y");
+            lua_pushnumber(L, z); lua_setfield(L, -2, "z");
+            luaL_setmetatable(L, "VectorMT");
+            return 1;
+        });
+        lua_setglobal(s_LuaState, "Vector");
+
         GE_CORE_DEBUG("Lua math bindings registered");
     }
 

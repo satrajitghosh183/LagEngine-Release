@@ -6,6 +6,14 @@
 #include "../Engine/Scene/Components/MeshRendererComponent.hpp"
 #include "../Engine/Scene/Components/LightComponent.hpp"
 #include "../Engine/Scene/Components/CameraComponent.hpp"
+#include "../Engine/Scene/Components/RigidBodyComponent.hpp"
+#include "../Engine/Scene/Components/ColliderComponent.hpp"
+#include "../Engine/Scene/Components/ClothComponent.hpp"
+#include "../Engine/Scene/Components/FluidEmitterComponent.hpp"
+#include "../Engine/Scene/Components/GPUParticleComponent.hpp"
+#include "../Engine/Scene/Components/SoftBodyComponent.hpp"
+#include "../Engine/Scene/Components/JointComponent.hpp"
+#include "../Engine/Scene/Components/RobotArmComponent.hpp"
 #include "../Engine/Graphics/MeshGenerator3D.hpp"
 #include "../Engine/Graphics/Shader.hpp"
 #include "../Engine/Graphics/Material.hpp"
@@ -24,6 +32,7 @@
 #include "Panels/ProfilerWindow.hpp"
 #include "Panels/GraphicsSettingsPanel.hpp"
 #include "Panels/ThemeEditorWindow.hpp"
+#include "Panels/AnimationPanel.hpp"
 #include "../Engine/Assets/TemplateManager.hpp"
 #include "../Engine/Assets/PresetManager.hpp"
 #include "../Engine/Graphics/RenderPath.hpp"
@@ -52,16 +61,8 @@ namespace GameEngine {
 
         // Create editor context
         m_EditorContext = CreateScope<EditorContext>();
-        m_EditorContext->SetStateChangeCallback([this](EditorState oldState, EditorState newState) {
-            if ((oldState == EditorState::Play || oldState == EditorState::Pause) && newState == EditorState::Edit) {
-                Ref<Scene> restored = m_EditorContext->GetActiveScene();
-                if (restored && m_CurrentSceneIndex >= 0 && m_CurrentSceneIndex < static_cast<int>(m_Scenes.size())) {
-                    m_Scenes[m_CurrentSceneIndex]->m_Scene = restored;
-                    if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetContext(restored);
-                    if (m_ViewportPanel) m_ViewportPanel->SetContext(restored);
-                }
-            }
-        });
+        // NOTE: the definitive state-change callback is registered below after
+        // all panels are constructed. This placeholder is intentionally removed.
         m_CommandHistory = CreateScope<CommandHistory>();
         m_HotkeyManager = CreateScope<HotkeyManager>();
         m_HotkeyManager->LoadFromConfig("editor_hotkeys.json");
@@ -92,7 +93,9 @@ namespace GameEngine {
                 if (entity.IsValid() && m_SceneHierarchyPanel) {
                     m_SceneHierarchyPanel->SetSelectedEntity(entity);
                 }
-                GetCurrentEditorScene().m_HasUnsavedChanges = true;
+                if (auto* es = TryGetCurrentEditorScene()) {
+                    es->m_HasUnsavedChanges = true;
+                }
             }
         });
         
@@ -132,18 +135,70 @@ namespace GameEngine {
 
         m_WelcomePanel = CreateScope<WelcomePanel>();
         m_WelcomePanel->SetVisible(true);
+        m_WelcomePanel->SetOnNewScene([this]() { m_WelcomePanel->SetVisible(false); NewScene(); });
         m_WelcomePanel->SetOnNewProject([this]() { if (m_NewProjectDialog) m_NewProjectDialog->Open(); });
         m_WelcomePanel->SetOnOpenProject([this]() { OpenProject(); });
         m_WelcomePanel->SetOnOpenScene([this]() { OpenScene(); });
+
+        m_AnimationPanel = CreateScope<AnimationPanel>();
+        m_AnimationPanel->SetContext(currentScene.m_Scene);
+
+        // Initialize new integrated panels
+        m_BuildPanel = CreateScope<BuildPanel>();
+        m_BuildPanel->SetProjectPath(std::filesystem::current_path().string());
+
+        m_CodeEditorPanel = CreateScope<CodeEditorPanel>();
+
+        m_AIAssistantPanel = CreateScope<AIAssistantPanel>();
+
+        m_MaterialEditorPanel = CreateScope<MaterialEditorPanel>();
+        m_MaterialEditorPanel->SetApplyToSelectedCallback([this](Ref<Material> material) {
+            if (!material) {
+                GE_CORE_WARN("No material to apply");
+                return;
+            }
+            Entity selected = m_SceneHierarchyPanel ? m_SceneHierarchyPanel->GetSelectedEntity() : Entity{};
+            if (!selected) {
+                GE_CORE_WARN("No entity selected to apply material to");
+                return;
+            }
+            if (selected.HasComponent<MeshRendererComponent>()) {
+                auto& meshRenderer = selected.GetComponent<MeshRendererComponent>();
+                meshRenderer.SetMaterial(material);
+                GE_CORE_INFO("Applied material '{}' to entity '{}'", 
+                            material->GetName(), selected.GetTag());
+                if (auto* es = TryGetCurrentEditorScene()) {
+                    es->m_HasUnsavedChanges = true;
+                }
+            } else {
+                GE_CORE_WARN("Selected entity does not have a MeshRendererComponent");
+            }
+        });
+
+        m_ObjectSpawnerPanel = CreateScope<ObjectSpawnerPanel>();
+        m_ObjectSpawnerPanel->SetScene(currentScene.m_Scene.get());
+        m_ObjectSpawnerPanel->SetOnEntitySpawnedCallback([this](Entity e) {
+            if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity(e);
+            if (auto* es = TryGetCurrentEditorScene()) {
+                es->m_HasUnsavedChanges = true;
+            }
+        });
+
+        m_ProjectSettingsPanel = CreateScope<ProjectSettingsPanel>();
 
         // Initialize template and preset managers
         TemplateManager::Init("Content/Templates");
         PresetManager::Init("Content/Presets");
 
-        // Set up state change callback to update scene references
+        // Set up state change callback to update scene references after stop/restore
         m_EditorContext->SetStateChangeCallback([this](EditorState oldState, EditorState newState) {
-            // When stopping, the scene may have been replaced
             if (newState == EditorState::Edit && oldState != EditorState::Edit) {
+                // EditorContext::RestoreSceneState() replaces m_ActiveScene with the
+                // restored copy. Pull that back into m_Scenes so all panels see it.
+                Ref<Scene> restored = m_EditorContext->GetActiveScene();
+                if (restored && m_CurrentSceneIndex >= 0 && m_CurrentSceneIndex < static_cast<int>(m_Scenes.size())) {
+                    m_Scenes[m_CurrentSceneIndex]->m_Scene = restored;
+                }
                 auto currentScene = GetCurrentScene();
                 if (currentScene && m_SceneHierarchyPanel) {
                     m_SceneHierarchyPanel->SetContext(currentScene);
@@ -151,6 +206,9 @@ namespace GameEngine {
                 }
                 if (currentScene && m_ViewportPanel) {
                     m_ViewportPanel->SetContext(currentScene);
+                }
+                if (currentScene && m_AnimationPanel) {
+                    m_AnimationPanel->SetContext(currentScene);
                 }
             }
         });
@@ -479,8 +537,10 @@ void main() {
                 if (m_SceneHierarchyPanel) {
                     m_SceneHierarchyPanel->SetSelectedEntity(entity);
                 }
-                
-                GetCurrentEditorScene().m_HasUnsavedChanges = true;
+
+                if (auto* es = TryGetCurrentEditorScene()) {
+                    es->m_HasUnsavedChanges = true;
+                }
 
                 GE_CORE_INFO("Dropped model '{}' into viewport", entityName);
             } else {
@@ -530,6 +590,12 @@ void main() {
         // ============ PLAY MODE: Update scene (physics, scripts, etc.) ============
         // Use EditorContext state (which is updated by ToolbarPanel play/pause/stop buttons)
         EditorState editorState = m_EditorContext ? m_EditorContext->GetState() : EditorState::Edit;
+
+        // Tell the viewport panel whether we are in play/pause so it can switch cameras
+        if (m_ViewportPanel) {
+            m_ViewportPanel->SetPlayMode(editorState == EditorState::Play
+                                      || editorState == EditorState::Pause);
+        }
         if (editorState == EditorState::Play || editorState == EditorState::Pause) {
             auto currentScene = GetCurrentScene();
             if (currentScene) {
@@ -558,7 +624,7 @@ void main() {
         }
 
         // Update viewport panel (handles camera input + picking)
-        if (m_ViewportPanel && m_CurrentSceneIndex >= 0) {
+        if (m_ViewportPanel && HasValidCurrentScene()) {
             // Before update: push hierarchy selection to viewport
             if (m_SceneHierarchyPanel) {
                 m_ViewportPanel->SetSelectedEntity(m_SceneHierarchyPanel->GetSelectedEntity());
@@ -567,12 +633,13 @@ void main() {
             m_ViewportPanel->OnUpdate(deltaTime);
 
             // Save camera state to current scene
-            auto& editorScene = GetCurrentEditorScene();
-            auto& cam = m_ViewportPanel->GetEditorCamera();
-            editorScene.m_CameraFocalPoint = cam.GetFocalPoint();
-            editorScene.m_CameraDistance = cam.GetDistance();
-            editorScene.m_CameraPitch = cam.GetPitch();
-            editorScene.m_CameraYaw = cam.GetYaw();
+            if (auto* editorScene = TryGetCurrentEditorScene()) {
+                auto& cam = m_ViewportPanel->GetEditorCamera();
+                editorScene->m_CameraFocalPoint = cam.GetFocalPoint();
+                editorScene->m_CameraDistance = cam.GetDistance();
+                editorScene->m_CameraPitch = cam.GetPitch();
+                editorScene->m_CameraYaw = cam.GetYaw();
+            }
 
             // After update: if viewport picked a different entity, push back to hierarchy
             if (m_SceneHierarchyPanel) {
@@ -584,10 +651,11 @@ void main() {
             }
         }
 
-            // Update components window with current selection
-        if (m_ComponentsWindow && m_SceneHierarchyPanel) {
+            // Update components window and animation panel with current selection
+        if (m_SceneHierarchyPanel) {
             Entity selected = m_SceneHierarchyPanel->GetSelectedEntity();
-            m_ComponentsWindow->SetSelectedEntity(selected);
+            if (m_ComponentsWindow) m_ComponentsWindow->SetSelectedEntity(selected);
+            if (m_AnimationPanel)   m_AnimationPanel->SetSelectedEntity(selected);
         }
 
         // Auto-save every 5 minutes (only when editing, scene has path and has unsaved changes)
@@ -595,10 +663,10 @@ void main() {
         if (m_AutoSaveTimer >= AUTO_SAVE_INTERVAL) {
             m_AutoSaveTimer = 0.0f;
             Ref<Scene> scene = GetCurrentScene();
-            if (scene && m_EditorContext->IsEditing()) {
-                auto& es = GetCurrentEditorScene();
-                if (es.m_HasUnsavedChanges && !es.m_Path.empty()) {
-                    std::string autosavePath = std::filesystem::path(es.m_Path).parent_path().string() + "/.autosave.scene";
+            auto* es = TryGetCurrentEditorScene();
+            if (scene && es && m_EditorContext && m_EditorContext->IsEditing()) {
+                if (es->m_HasUnsavedChanges && !es->m_Path.empty()) {
+                    std::string autosavePath = std::filesystem::path(es->m_Path).parent_path().string() + "/.autosave.scene";
                     SceneSerializer s(scene);
                     if (s.Serialize(autosavePath)) GE_CORE_DEBUG("Auto-saved to {0}", autosavePath);
                 }
@@ -646,6 +714,7 @@ void main() {
             m_ShaderWatcher->Stop();
             m_ShaderWatcher.reset();
         }
+        m_AnimationPanel.reset();
         m_ComponentsWindow.reset();
         m_ScriptingConsolePanel.reset();
         m_ProfilerWindow.reset();
@@ -690,32 +759,80 @@ void main() {
         ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->WorkSize);
 
-        // Split: left (15%) | center+right (85%)
-        ImGuiID dock_left, dock_main;
-        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.15f, &dock_left, &dock_main);
+        // ── Unity-style layout ───────────────────────────────────────────────
+        //
+        //  ┌──────────────────────────────────────────────────────────────────┐
+        //  │  Menu bar  (inside DockSpace window)                             │
+        //  ├───────────────────────────┬──────────────────────────────────────┤
+        //  │  Scene Tabs               │  ▶ ‖ ■  Toolbar (play/pause/stop)   │
+        //  ├───────────┬───────────────┴──────────────────────┬───────────────┤
+        //  │           │                                       │               │
+        //  │ Hierarchy │            Viewport                   │  Components   │
+        //  │           │                                       │  (Inspector)  │
+        //  │           ├─────────────────────┬─────────────────┤  tabbed with  │
+        //  │           │  Console / Script    │  Asset Browser  │  Graphics     │
+        //  │           │  (tabbed)            │  / Profiler     │  Theme Ed.    │
+        //  └───────────┴─────────────────────┴─────────────────┴───────────────┘
 
-        // Split center+right: center (78%) | right (22%)
-        ImGuiID dock_center, dock_right;
-        ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.22f, &dock_right, &dock_center);
+        // 1. Top bar: Scene Tabs (left 55%) | Toolbar play controls (right 45%)
+        ImGuiID dock_topbar, dock_body;
+        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Up, 0.045f, &dock_topbar, &dock_body);
 
-        // Split center: viewport (top 80%) | bottom (20%)
+        ImGuiID dock_scene_tabs, dock_toolbar;
+        ImGui::DockBuilderSplitNode(dock_topbar, ImGuiDir_Left, 0.55f, &dock_scene_tabs, &dock_toolbar);
+
+        // 2. Left column: Scene Hierarchy (17%)
+        ImGuiID dock_hierarchy, dock_center_right;
+        ImGui::DockBuilderSplitNode(dock_body, ImGuiDir_Left, 0.17f, &dock_hierarchy, &dock_center_right);
+
+        // 3. Right column: Inspector / Components (25% of remaining width)
+        ImGuiID dock_inspector, dock_center;
+        ImGui::DockBuilderSplitNode(dock_center_right, ImGuiDir_Right, 0.25f, &dock_inspector, &dock_center);
+
+        // 4. Center: Viewport (top 76%) | bottom panels (24%)
         ImGuiID dock_viewport, dock_bottom;
-        ImGui::DockBuilderSplitNode(dock_center, ImGuiDir_Down, 0.20f, &dock_bottom, &dock_viewport);
+        ImGui::DockBuilderSplitNode(dock_center, ImGuiDir_Down, 0.24f, &dock_bottom, &dock_viewport);
 
-        // Split bottom: console (50%) | asset browser (50%)
+        // 5. Bottom strip: Console area (left 50%) | Asset/utility area (right 50%)
         ImGuiID dock_console, dock_assets;
         ImGui::DockBuilderSplitNode(dock_bottom, ImGuiDir_Left, 0.50f, &dock_console, &dock_assets);
 
-        // Dock windows into their positions
-        ImGui::DockBuilderDockWindow("Scene Hierarchy", dock_left);
-        ImGui::DockBuilderDockWindow("Components", dock_right);
-        ImGui::DockBuilderDockWindow("Viewport", dock_viewport);
-        ImGui::DockBuilderDockWindow("Console", dock_console);
-        ImGui::DockBuilderDockWindow("Asset Browser", dock_assets);
+        // 6. Hide the tab bar on the two top-bar nodes so they look like a
+        //    clean toolbar strip rather than tabbed panels.
+        if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_scene_tabs))
+            n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
+        if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_toolbar))
+            n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
+
+        // 7. Assign windows to nodes
+        ImGui::DockBuilderDockWindow("Scene Tabs",        dock_scene_tabs);
+        ImGui::DockBuilderDockWindow("##toolbar",         dock_toolbar);
+
+        ImGui::DockBuilderDockWindow("Scene Hierarchy",   dock_hierarchy);
+
+        // Inspector column — Components is the primary tab
+        ImGui::DockBuilderDockWindow("Components",        dock_inspector);
+        ImGui::DockBuilderDockWindow("Graphics Settings", dock_inspector);
+        ImGui::DockBuilderDockWindow("Theme Editor",      dock_inspector);
+
+        ImGui::DockBuilderDockWindow("Viewport",          dock_viewport);
+
+        // Console area (tabbed) — Animation shares this strip
+        ImGui::DockBuilderDockWindow("Console",           dock_console);
         ImGui::DockBuilderDockWindow("Scripting Console", dock_console);
-        ImGui::DockBuilderDockWindow("Profiler", dock_bottom);
-        ImGui::DockBuilderDockWindow("Graphics Settings", dock_right);
-        ImGui::DockBuilderDockWindow("Theme Editor", dock_right);
+        ImGui::DockBuilderDockWindow("Animation",         dock_console);
+
+        // Asset / utility area (tabbed)
+        ImGui::DockBuilderDockWindow("Asset Browser",     dock_assets);
+        ImGui::DockBuilderDockWindow("Profiler",          dock_assets);
+
+        // New panels - docked into existing regions
+        ImGui::DockBuilderDockWindow("Object Spawner",    dock_hierarchy);   // Left with Hierarchy
+        ImGui::DockBuilderDockWindow("Code Editor",       dock_viewport);    // Center with Viewport
+        ImGui::DockBuilderDockWindow("Build",             dock_console);     // Bottom-left with Console
+        ImGui::DockBuilderDockWindow("Material Editor",   dock_inspector);   // Right with Components
+        ImGui::DockBuilderDockWindow("AI Assistant",      dock_inspector);   // Right with Components
+        ImGui::DockBuilderDockWindow("Project Settings",  dock_inspector);   // Right with Components
 
         ImGui::DockBuilderFinish(dockspace_id);
 #endif
@@ -927,7 +1044,9 @@ void main() {
                 auto currentScene = GetCurrentScene();
                 auto selectEntity = [this](Entity e) {
                     if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity(e);
-                    GetCurrentEditorScene().m_HasUnsavedChanges = true;
+                    if (auto* es = TryGetCurrentEditorScene()) {
+                        es->m_HasUnsavedChanges = true;
+                    }
                 };
                 if (ImGui::MenuItem("Create Empty")) {
                     if (currentScene) {
@@ -993,6 +1112,27 @@ void main() {
                 ImGui::EndMenu();
             }
             
+            if (ImGui::BeginMenu("Demos")) {
+                ImGui::TextDisabled("Load a pre-built demo scene");
+                ImGui::Separator();
+                ImGui::TextDisabled("-- Physics --");
+                if (ImGui::MenuItem("Physics Simulation"))    LoadPhysicsDemo();
+                if (ImGui::MenuItem("Cloth Simulation"))      LoadClothDemo();
+                if (ImGui::MenuItem("SPH Water"))             LoadSPHWaterDemo();
+                if (ImGui::MenuItem("Soft Body (XPBD)"))      LoadSoftBodyDemo();
+                if (ImGui::MenuItem("Joints & Constraints"))  LoadJointsDemo();
+                if (ImGui::MenuItem("Character Demo"))        LoadCharacterDemo();
+                if (ImGui::MenuItem("Cannon Shooting"))       LoadCannonShootingDemo();
+                ImGui::Separator();
+                ImGui::TextDisabled("-- Visual --");
+                if (ImGui::MenuItem("Lighting Showcase"))     LoadLightingDemo();
+                if (ImGui::MenuItem("GPU Particles"))         LoadGPUParticleDemo();
+                ImGui::Separator();
+                ImGui::TextDisabled("-- Robotics --");
+                if (ImGui::MenuItem("Robot Arm (IK)"))        LoadRobotArmDemo();
+                ImGui::EndMenu();
+            }
+
             if (ImGui::BeginMenu("View")) {
                 if (ImGui::MenuItem("Reset Camera")) {
                     if (m_ViewportPanel) {
@@ -1023,8 +1163,30 @@ void main() {
                     }
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem("Shader Assistant")) {
-                    // Panel is always rendered, just use ImGui::Begin visibility
+                if (ImGui::MenuItem("Shader Assistant", nullptr, m_ShaderAssistantPanel && m_ShaderAssistantPanel->IsOpen())) {
+                    if (m_ShaderAssistantPanel) m_ShaderAssistantPanel->Toggle();
+                }
+                ImGui::Separator();
+                ImGui::TextDisabled("-- Tools --");
+                if (ImGui::MenuItem("Build", nullptr, m_BuildPanel && m_BuildPanel->IsOpen())) {
+                    if (m_BuildPanel) m_BuildPanel->Toggle();
+                }
+                if (ImGui::MenuItem("Code Editor", nullptr, m_CodeEditorPanel && m_CodeEditorPanel->IsOpen())) {
+                    if (m_CodeEditorPanel) m_CodeEditorPanel->Toggle();
+                }
+                if (ImGui::MenuItem("AI Assistant", nullptr, m_AIAssistantPanel && m_AIAssistantPanel->IsOpen())) {
+                    if (m_AIAssistantPanel) m_AIAssistantPanel->Toggle();
+                }
+                ImGui::Separator();
+                ImGui::TextDisabled("-- Content --");
+                if (ImGui::MenuItem("Material Editor", nullptr, m_MaterialEditorPanel && m_MaterialEditorPanel->IsOpen())) {
+                    if (m_MaterialEditorPanel) m_MaterialEditorPanel->Toggle();
+                }
+                if (ImGui::MenuItem("Object Spawner", nullptr, m_ObjectSpawnerPanel && m_ObjectSpawnerPanel->IsOpen())) {
+                    if (m_ObjectSpawnerPanel) m_ObjectSpawnerPanel->Toggle();
+                }
+                if (ImGui::MenuItem("Project Settings", nullptr, m_ProjectSettingsPanel && m_ProjectSettingsPanel->IsOpen())) {
+                    if (m_ProjectSettingsPanel) m_ProjectSettingsPanel->Toggle();
                 }
                 ImGui::EndMenu();
             }
@@ -1106,6 +1268,30 @@ void main() {
         if (m_WelcomePanel) {
             m_WelcomePanel->OnImGuiRender();
         }
+
+        if (m_AnimationPanel) {
+            m_AnimationPanel->OnImGuiRender();
+        }
+
+        // Render new integrated panels
+        if (m_BuildPanel) {
+            m_BuildPanel->OnImGuiRender();
+        }
+        if (m_CodeEditorPanel) {
+            m_CodeEditorPanel->OnImGuiRender();
+        }
+        if (m_AIAssistantPanel) {
+            m_AIAssistantPanel->OnImGuiRender();
+        }
+        if (m_MaterialEditorPanel) {
+            m_MaterialEditorPanel->OnImGuiRender();
+        }
+        if (m_ObjectSpawnerPanel) {
+            m_ObjectSpawnerPanel->OnImGuiRender();
+        }
+        if (m_ProjectSettingsPanel) {
+            m_ProjectSettingsPanel->OnImGuiRender();
+        }
     }
 
     EditorScene& EditorApp::GetCurrentEditorScene() {
@@ -1120,6 +1306,20 @@ void main() {
             throw std::runtime_error("GetCurrentEditorScene: invalid scene index " + std::to_string(m_CurrentSceneIndex));
         }
         return *m_Scenes[m_CurrentSceneIndex].get();
+    }
+
+    EditorScene* EditorApp::TryGetCurrentEditorScene() {
+        if (m_CurrentSceneIndex < 0 || m_CurrentSceneIndex >= static_cast<int>(m_Scenes.size())) {
+            return nullptr;
+        }
+        return m_Scenes[m_CurrentSceneIndex].get();
+    }
+
+    const EditorScene* EditorApp::TryGetCurrentEditorScene() const {
+        if (m_CurrentSceneIndex < 0 || m_CurrentSceneIndex >= static_cast<int>(m_Scenes.size())) {
+            return nullptr;
+        }
+        return m_Scenes[m_CurrentSceneIndex].get();
     }
 
     Ref<Scene> EditorApp::GetCurrentScene() {
@@ -1151,13 +1351,14 @@ void main() {
         }
         
         // Save current camera state before switching
-        if (m_CurrentSceneIndex >= 0 && m_ViewportPanel) {
-            auto& oldScene = GetCurrentEditorScene();
-            auto& cam = m_ViewportPanel->GetEditorCamera();
-            oldScene.m_CameraFocalPoint = cam.GetFocalPoint();
-            oldScene.m_CameraDistance = cam.GetDistance();
-            oldScene.m_CameraPitch = cam.GetPitch();
-            oldScene.m_CameraYaw = cam.GetYaw();
+        if (m_ViewportPanel) {
+            if (auto* oldScene = TryGetCurrentEditorScene()) {
+                auto& cam = m_ViewportPanel->GetEditorCamera();
+                oldScene->m_CameraFocalPoint = cam.GetFocalPoint();
+                oldScene->m_CameraDistance = cam.GetDistance();
+                oldScene->m_CameraPitch = cam.GetPitch();
+                oldScene->m_CameraYaw = cam.GetYaw();
+            }
         }
         
         m_CurrentSceneIndex = index;
@@ -1181,6 +1382,10 @@ void main() {
         if (m_EditorContext) {
             m_EditorContext->SetActiveScene(editorScene.m_Scene);
         }
+        if (m_AnimationPanel) {
+            m_AnimationPanel->SetContext(editorScene.m_Scene);
+            m_AnimationPanel->SetSelectedEntity({});
+        }
     }
 
     bool EditorApp::CheckUnsavedChanges(int index) {
@@ -1194,6 +1399,11 @@ void main() {
     }
 
     void EditorApp::NewScene() {
+        // If currently playing or paused, stop cleanly before switching scenes.
+        if (m_EditorContext && !m_EditorContext->IsEditing()) {
+            m_EditorContext->Stop();
+        }
+
         auto editorScene = std::make_unique<EditorScene>();
         editorScene->m_ID = m_NextSceneID++;
         editorScene->m_Path = "";
@@ -1242,6 +1452,11 @@ void main() {
     }
 
     void EditorApp::OpenSceneInNewTab(const std::string& path) {
+        // Stop play/pause before loading a scene into a new tab.
+        if (m_EditorContext && !m_EditorContext->IsEditing()) {
+            m_EditorContext->Stop();
+        }
+
         Ref<Scene> newScene = CreateRef<Scene>();
         SceneSerializer serializer(newScene);
         
@@ -1341,6 +1556,7 @@ void main() {
                 SetCurrentScene(newIndex);
             } else {
                 // Last scene - create new empty one
+                m_CurrentSceneIndex = -1; // Mark as invalid before erasing
                 m_Scenes.erase(m_Scenes.begin());
                 NewScene();
             }
@@ -1349,6 +1565,12 @@ void main() {
             if (index < m_CurrentSceneIndex) {
                 m_CurrentSceneIndex--;
             }
+        }
+        
+        // Sanity check: ensure index is valid after operation
+        if (!m_Scenes.empty() && m_CurrentSceneIndex >= static_cast<int>(m_Scenes.size())) {
+            GE_CORE_WARN("CloseScene: Correcting invalid scene index {} to {}", m_CurrentSceneIndex, m_Scenes.size() - 1);
+            m_CurrentSceneIndex = static_cast<int>(m_Scenes.size()) - 1;
         }
     }
     
@@ -1384,7 +1606,1177 @@ void main() {
         // No-op: EditorContext handles restore; callback syncs tab and panels
     }
 
-}
+    // ==================== Demo Scenes ====================
+
+    void EditorApp::LoadPhysicsDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Path = "";
+        editorScene->m_Scene = CreateRef<Scene>("Physics Demo");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene) return;
+        if (!m_DefaultShader || !m_DefaultMaterial) return;
+
+        // === Checkerboard ground (like old_code/arm-simulation) ===
+        // Creates a 50x50 grid of alternating light/dark squares
+        float squareSize = 0.4f;
+        int gridSize = 25;
+        for (int i = 0; i < gridSize; i++) {
+            for (int j = 0; j < gridSize; j++) {
+                bool isLight = (i + j) % 2 == 0;
+                glm::vec3 color = isLight ? glm::vec3(0.8f, 0.8f, 0.8f) : glm::vec3(0.3f, 0.3f, 0.3f);
+                
+                auto tileMesh = MeshGenerator3D::CreatePlane(squareSize, squareSize);
+                std::string name = "Tile_" + std::to_string(i) + "_" + std::to_string(j);
+                Entity tile = scene->CreateEntity(name);
+                auto tMat = CreateRef<Material>(*m_DefaultMaterial);
+                tMat->SetAlbedo(color);
+                tMat->SetRoughness(0.6f);
+                tMat->SetMetallic(0.1f);
+                tile.AddComponent<MeshRendererComponent>(tileMesh, tMat);
+                auto& tf = tile.GetComponent<TransformComponent>();
+                tf.Position = glm::vec3(
+                    (i - gridSize/2) * squareSize,
+                    -0.5f,
+                    (j - gridSize/2) * squareSize
+                );
+            }
+        }
+        
+        // Ground collision plane
+        Entity groundCollider = scene->CreateEntity("Ground Collider");
+        groundCollider.GetComponent<TransformComponent>().Position = glm::vec3(0.0f, -0.5f, 0.0f);
+        auto& gRb = groundCollider.AddComponent<RigidBodyComponent>();
+        gRb.Type = RigidBodyComponent::BodyType::Static;
+        groundCollider.AddComponent<ColliderComponent>(CreateRef<Physics::BoxShape>(glm::vec3(5.0f, 0.1f, 5.0f)));
+
+        // Stack of colourful cubes (3x3 tower)
+        glm::vec3 cubeColors[] = {
+            {0.9f,0.2f,0.2f},{0.2f,0.7f,0.9f},{0.9f,0.8f,0.2f},
+            {0.8f,0.3f,0.9f},{0.2f,0.9f,0.4f},{0.9f,0.5f,0.1f},
+            {0.5f,0.9f,0.9f},{0.9f,0.3f,0.5f},{0.3f,0.5f,0.9f}
+        };
+        for (int y = 0; y < 3; y++) {
+            for (int x = 0; x < 3; x++) {
+                auto cubeMesh = MeshGenerator3D::CreateCube(0.9f);
+                std::string name = "Cube_" + std::to_string(y * 3 + x);
+                Entity cube = scene->CreateEntity(name);
+                auto cMat = CreateRef<Material>(*m_DefaultMaterial);
+                cMat->SetAlbedo(cubeColors[y * 3 + x]);
+                cMat->SetRoughness(0.4f);
+                cube.AddComponent<MeshRendererComponent>(cubeMesh, cMat);
+                auto& tf = cube.GetComponent<TransformComponent>();
+                tf.Position = glm::vec3((x - 1) * 1.1f, y * 1.0f + 0.5f, 0.0f);
+                auto& cRb = cube.AddComponent<RigidBodyComponent>();
+                cRb.Type = RigidBodyComponent::BodyType::Dynamic;
+                cRb.Mass = 1.0f;
+                cube.AddComponent<ColliderComponent>(CreateRef<Physics::BoxShape>(glm::vec3(0.45f)));
+            }
+        }
+
+        // Green transparent sphere (like arm-simulation's sphere)
+        auto sphereMesh = MeshGenerator3D::CreateSphere(0.4f, 16, 16);
+        Entity sphere = scene->CreateEntity("Green Sphere");
+        auto sMat = CreateRef<Material>(*m_DefaultMaterial);
+        sMat->SetAlbedo(glm::vec3(0.0f, 0.5f, 0.0f));  // Green
+        sMat->SetRoughness(0.3f);
+        sMat->SetMetallic(0.1f);
+        sphere.AddComponent<MeshRendererComponent>(sphereMesh, sMat);
+        auto& sTf = sphere.GetComponent<TransformComponent>();
+        sTf.Position = glm::vec3(0.0f, 0.4f, 0.0f);
+        auto& sRb = sphere.AddComponent<RigidBodyComponent>();
+        sRb.Type = RigidBodyComponent::BodyType::Dynamic;
+        sRb.Mass = 0.5f;
+        sphere.AddComponent<ColliderComponent>(CreateRef<Physics::SphereShape>(0.4f));
+
+        // Ramp
+        auto rampMesh = MeshGenerator3D::CreatePlane(4.0f, 6.0f);
+        Entity ramp = scene->CreateEntity("Ramp");
+        auto rMat = CreateRef<Material>(*m_DefaultMaterial);
+        rMat->SetAlbedo(glm::vec3(0.7f, 0.6f, 0.5f));
+        ramp.AddComponent<MeshRendererComponent>(rampMesh, rMat);
+        auto& rTf = ramp.GetComponent<TransformComponent>();
+        rTf.Position = glm::vec3(4.0f, 1.0f, 0.0f);
+        rTf.Rotation = glm::quat(glm::radians(glm::vec3(0.0f, 0.0f, -25.0f)));
+
+        // Moving light (like arm-simulation's rotating light)
+        Entity light = scene->CreateEntity("Moving Light");
+        auto& lTf = light.GetComponent<TransformComponent>();
+        lTf.Position = glm::vec3(6.0f, 3.5f, 6.0f);  // Start position
+        auto lightMesh = MeshGenerator3D::CreateCube(0.2f);
+        auto lightMat = CreateRef<Material>(*m_DefaultMaterial);
+        lightMat->SetAlbedo(glm::vec3(1.0f, 1.0f, 1.0f));  // White cube marker
+        light.AddComponent<MeshRendererComponent>(lightMesh, lightMat);
+        auto& lc = light.AddComponent<LightComponent>(LightType::Point);
+        lc.Intensity = 3.0f;
+        lc.Color = glm::vec3(1.0f, 1.0f, 1.0f);
+        lc.Range = 15.0f;
+        lc.SyncToLight();
+
+        // Camera (like arm-simulation's initial view)
+        Entity cam = scene->CreateEntity("Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        camTf.Position = glm::vec3(6.0f, 4.0f, 6.0f);
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-25.0f, 45.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV = 60.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity({});
+        GE_CORE_INFO("Loaded Physics Demo");
+    }
+
+    void EditorApp::LoadLightingDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Path = "";
+        editorScene->m_Scene = CreateRef<Scene>("Lighting Demo");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultShader || !m_DefaultMaterial) return;
+
+        // Large ground
+        auto groundMesh = MeshGenerator3D::CreatePlane(20.0f, 20.0f);
+        Entity ground = scene->CreateEntity("Floor");
+        auto gMat = CreateRef<Material>(*m_DefaultMaterial);
+        gMat->SetAlbedo(glm::vec3(0.15f));
+        gMat->SetRoughness(0.1f);
+        gMat->SetMetallic(0.8f);
+        ground.AddComponent<MeshRendererComponent>(groundMesh, gMat);
+        ground.GetComponent<TransformComponent>().Position = glm::vec3(0, -0.5f, 0);
+
+        // Central sphere
+        Entity sphere = scene->CreateEntity("Chrome Sphere");
+        auto sMat = CreateRef<Material>(*m_DefaultMaterial);
+        sMat->SetAlbedo(glm::vec3(0.9f));
+        sMat->SetMetallic(1.0f);
+        sMat->SetRoughness(0.05f);
+        sphere.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(1.0f, 48, 24), sMat);
+        sphere.GetComponent<TransformComponent>().Position = glm::vec3(0, 0.5f, 0);
+
+        // Surrounding cubes on pedestals
+        struct CubeInfo { glm::vec3 pos; glm::vec3 color; float metal; float rough; };
+        CubeInfo cubes[] = {
+            {{ 3.5f, 0.4f,  0.0f}, {1.0f,0.2f,0.2f}, 0.0f, 0.7f},
+            {{-3.5f, 0.4f,  0.0f}, {0.2f,0.5f,1.0f}, 0.0f, 0.5f},
+            {{ 0.0f, 0.4f,  3.5f}, {0.2f,1.0f,0.4f}, 0.8f, 0.2f},
+            {{ 0.0f, 0.4f, -3.5f}, {1.0f,0.8f,0.1f}, 0.1f, 0.9f},
+        };
+        for (auto& ci : cubes) {
+            Entity e = scene->CreateEntity("Pedestal Object");
+            auto mat = CreateRef<Material>(*m_DefaultMaterial);
+            mat->SetAlbedo(ci.color);
+            mat->SetMetallic(ci.metal);
+            mat->SetRoughness(ci.rough);
+            e.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCube(0.7f), mat);
+            e.GetComponent<TransformComponent>().Position = ci.pos;
+        }
+
+        // Coloured point lights circling the scene
+        struct LightInfo { glm::vec3 pos; glm::vec3 color; float intensity; };
+        LightInfo lights[] = {
+            {{ 4.0f, 2.5f,  0.0f}, {1.0f,0.2f,0.2f}, 4.0f},
+            {{-4.0f, 2.5f,  0.0f}, {0.2f,0.5f,1.0f}, 4.0f},
+            {{ 0.0f, 2.5f,  4.0f}, {0.2f,1.0f,0.3f}, 4.0f},
+            {{ 0.0f, 2.5f, -4.0f}, {1.0f,0.8f,0.1f}, 4.0f},
+        };
+        for (auto& li : lights) {
+            Entity e = scene->CreateEntity("Point Light");
+            auto& tf = e.GetComponent<TransformComponent>();
+            tf.Position = li.pos;
+            auto& lc = e.AddComponent<LightComponent>(LightType::Point);
+            lc.Color = li.color;
+            lc.Intensity = li.intensity;
+            lc.Range = 10.0f;
+            lc.SyncToLight();
+        }
+
+        // Overhead directional fill light (soft)
+        Entity sun = scene->CreateEntity("Fill Light");
+        sun.GetComponent<TransformComponent>().Rotation =
+            glm::quat(glm::radians(glm::vec3(-60.0f, 20.0f, 0.0f)));
+        auto& slc = sun.AddComponent<LightComponent>(LightType::Directional);
+        slc.Intensity = 0.5f;
+        slc.Color = glm::vec3(0.8f, 0.85f, 1.0f);
+        slc.SyncToLight();
+
+        // Camera for demo
+        Entity cam = scene->CreateEntity("Demo Camera");
+        cam.GetComponent<TransformComponent>().Position = glm::vec3(6.0f, 4.0f, 6.0f);
+        cam.GetComponent<TransformComponent>().Rotation =
+            glm::quat(glm::radians(glm::vec3(-25.0f, 45.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV = 50.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity({});
+        GE_CORE_INFO("Loaded Lighting Demo");
+    }
+
+    // ==================== Cloth Simulation ====================
+
+    void EditorApp::LoadClothDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("Cloth Simulation");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // Ground
+        Entity ground = scene->CreateEntity("Ground");
+        auto gMat = CreateRef<Material>(*m_DefaultMaterial);
+        gMat->SetAlbedo(glm::vec3(0.30f, 0.45f, 0.25f));
+        gMat->SetRoughness(0.9f);
+        ground.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreatePlane(12.0f, 12.0f), gMat);
+        ground.GetComponent<TransformComponent>().Position = glm::vec3(0, -2.0f, 0);
+
+        // Flagpole
+        Entity pole = scene->CreateEntity("Flagpole");
+        auto poleMat = CreateRef<Material>(*m_DefaultMaterial);
+        poleMat->SetAlbedo(glm::vec3(0.55f, 0.35f, 0.15f));
+        poleMat->SetRoughness(0.8f);
+        pole.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCylinder(0.06f, 5.0f, 12), poleMat);
+        pole.GetComponent<TransformComponent>().Position = glm::vec3(-1.5f, 0.5f, 0.0f);
+
+        // Cloth flag — pinned on left edge, wind blowing right
+        // resolutionX=20, resolutionY=14 → CreatePlane subdivisions=(resX-1, resY-1)=(19,13)
+        // so vertex count = 20*14 = 280 == particle count
+        Entity flag = scene->CreateEntity("Cloth Flag");
+        flag.GetComponent<TransformComponent>().Position = glm::vec3(-1.4f, 1.8f, 0.0f);
+        auto flagMesh = MeshGenerator3D::CreatePlane(3.0f, 2.0f, 19, 13);
+        auto flagMat  = CreateRef<Material>(*m_DefaultMaterial);
+        flagMat->SetAlbedo(glm::vec3(0.85f, 0.20f, 0.15f));
+        flagMat->SetRoughness(0.8f);
+        flag.AddComponent<MeshRendererComponent>(flagMesh, flagMat);
+        auto& flagCloth = flag.AddComponent<ClothComponent>();
+        flagCloth.Initialize(3.0f, 2.0f, 20, 14);
+        flagCloth.SetMesh(flagMesh);   // ClothComponent drives this mesh's vertices
+        flagCloth.PinTopLeft     = true;
+        flagCloth.PinTopRight    = false;
+        flagCloth.PinBottomLeft  = true;
+        flagCloth.PinBottomRight = false;
+        flagCloth.WindEnabled    = true;
+        flagCloth.WindDirection  = glm::vec3(1.0f, 0.0f, 0.0f);
+        flagCloth.WindStrength   = 2.5f;
+        flagCloth.Stiffness      = 45.0f;
+        flagCloth.Damping        = 0.97f;
+        flagCloth.Mass           = 0.5f;
+
+        // Free cloth — no pins, falls and drapes
+        // resolutionX=15, resolutionY=15 → subdivisions=(14,14), vertices=15*15=225
+        Entity cloth2 = scene->CreateEntity("Free Cloth");
+        cloth2.GetComponent<TransformComponent>().Position = glm::vec3(3.0f, 2.5f, 0.0f);
+        auto cloth2Mesh = MeshGenerator3D::CreatePlane(2.0f, 2.0f, 14, 14);
+        auto cloth2Mat  = CreateRef<Material>(*m_DefaultMaterial);
+        cloth2Mat->SetAlbedo(glm::vec3(0.25f, 0.50f, 0.85f));
+        cloth2Mat->SetRoughness(0.85f);
+        cloth2.AddComponent<MeshRendererComponent>(cloth2Mesh, cloth2Mat);
+        auto& c2 = cloth2.AddComponent<ClothComponent>();
+        c2.Initialize(2.0f, 2.0f, 15, 15);
+        c2.SetMesh(cloth2Mesh);        // ClothComponent drives this mesh's vertices
+        c2.PinTopLeft  = false;
+        c2.PinTopRight = false;
+        c2.WindEnabled = false;
+        c2.Stiffness   = 60.0f;
+        c2.Mass        = 1.0f;
+
+        // Static sphere obstacle the cloth drapes over
+        Entity obs = scene->CreateEntity("Sphere Obstacle");
+        auto obsMat = CreateRef<Material>(*m_DefaultMaterial);
+        obsMat->SetAlbedo(glm::vec3(0.85f, 0.25f, 0.20f));
+        obsMat->SetMetallic(0.7f);
+        obsMat->SetRoughness(0.2f);
+        obs.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.65f, 24, 12), obsMat);
+        obs.GetComponent<TransformComponent>().Position = glm::vec3(3.0f, 0.0f, 0.0f);
+        auto& obsRb = obs.AddComponent<RigidBodyComponent>();
+        obsRb.Type = RigidBodyComponent::BodyType::Static;
+        obs.AddComponent<ColliderComponent>(CreateRef<Physics::SphereShape>(0.65f));
+
+        // Directional light
+        Entity sun = scene->CreateEntity("Sun");
+        sun.GetComponent<TransformComponent>().Rotation =
+            glm::quat(glm::radians(glm::vec3(-45.0f, 30.0f, 0.0f)));
+        auto& lc = sun.AddComponent<LightComponent>(LightType::Directional);
+        lc.Intensity = 2.2f;
+        lc.Color     = glm::vec3(1.0f, 0.97f, 0.88f);
+        lc.SyncToLight();
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity({});
+        GE_CORE_INFO("Loaded Cloth Simulation Demo");
+    }
+
+    // ==================== SPH Water Simulation ====================
+
+    void EditorApp::LoadSPHWaterDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("SPH Water Simulation");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // Glass-like tank material
+        auto wallMat = CreateRef<Material>(*m_DefaultMaterial);
+        wallMat->SetAlbedo(glm::vec3(0.75f, 0.85f, 0.95f));
+        wallMat->SetMetallic(0.1f);
+        wallMat->SetRoughness(0.05f);
+
+        // Helper to create a static axis-aligned box (visual + collider)
+        auto makeBox = [&](const std::string& name, glm::vec3 pos, glm::vec3 scale) {
+            Entity e = scene->CreateEntity(name);
+            auto& tf = e.GetComponent<TransformComponent>();
+            tf.Position = pos;
+            tf.Scale    = scale;
+            e.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCube(1.0f), wallMat);
+            auto& rb = e.AddComponent<RigidBodyComponent>();
+            rb.Type = RigidBodyComponent::BodyType::Static;
+            e.AddComponent<ColliderComponent>(CreateRef<Physics::BoxShape>(scale * 0.5f));
+        };
+
+        // 4 × 4 × 4 open-top tank
+        makeBox("Tank Floor",   { 0.0f, -2.1f,  0.0f}, {4.2f, 0.2f, 4.2f});
+        makeBox("Tank Wall +X", { 2.1f,  0.0f,  0.0f}, {0.2f, 4.0f, 4.2f});
+        makeBox("Tank Wall -X", {-2.1f,  0.0f,  0.0f}, {0.2f, 4.0f, 4.2f});
+        makeBox("Tank Wall +Z", { 0.0f,  0.0f,  2.1f}, {4.2f, 4.0f, 0.2f});
+        makeBox("Tank Wall -Z", { 0.0f,  0.0f, -2.1f}, {4.2f, 4.0f, 0.2f});
+
+        // -----------------------------------------------------------------------
+        // SPH Water — block initialization matching old_code/src/sph_water.cpp
+        //
+        //   Old code spawns: nx=36, ny=25, nz=18 (≈16k particles)
+        //   We use a scaled-down version that fits in the 4×4×4 tank:
+        //     nx=16, ny=12, nz=12  ≈ 2304 particles, spacing=0.14 m
+        //
+        //   BoundsMin/Max match the tank interior walls.
+        //   After adding to scene, InitWaterBlock() is called in OnCreate
+        //   (or we call it manually via the editor's Play → OnCreate path).
+        // -----------------------------------------------------------------------
+        Entity fluid = scene->CreateEntity("Water (SPH)");
+        fluid.GetComponent<TransformComponent>().Position = glm::vec3(0.0f, 0.0f, 0.0f);
+        auto& fe = fluid.AddComponent<FluidEmitterComponent>();
+        // SPH parameters matching old_code/src/sph_water.cpp exactly
+        fe.SmoothingLength      = 0.045f;
+        fe.RestDensity          = 1000.0f;
+        fe.PressureCoefficient  = 1.6f;
+        fe.ViscosityCoefficient = 0.15f;
+        fe.BounceCoefficient    = 0.4f;
+        fe.ParticleSize         = 0.06f;   // visual render radius (bigger for visibility)
+        fe.BoundsMin            = glm::vec3(-1.9f, -1.9f, -1.9f);
+        fe.BoundsMax            = glm::vec3( 1.9f,  1.9f,  1.9f);
+        fe.Emitting             = false;   // block init — no continuous emission
+        fe.MaxParticles         = 5000;
+        // Block init: nx=16, ny=12, nz=12 at spacing=0.06 (= h*1.33 — kernels overlap properly)
+        // → 2304 particles filling 0.96×0.72×0.72m in the lower quarter of the 3.8m tank
+        fe.InitBlockNx      = 16;
+        fe.InitBlockNy      = 12;
+        fe.InitBlockNz      = 12;
+        fe.InitBlockSpacing = 0.06f;  // OnCreate() auto-calls InitWaterBlock() with these params
+
+        // Sky directional light
+        Entity sky = scene->CreateEntity("Sky Light");
+        sky.GetComponent<TransformComponent>().Rotation =
+            glm::quat(glm::radians(glm::vec3(-60.0f, 15.0f, 0.0f)));
+        auto& slc = sky.AddComponent<LightComponent>(LightType::Directional);
+        slc.Intensity = 1.8f;
+        slc.Color     = glm::vec3(0.85f, 0.92f, 1.0f);
+        slc.SyncToLight();
+
+        // Blue underwater glow
+        Entity waterLight = scene->CreateEntity("Water Glow");
+        waterLight.GetComponent<TransformComponent>().Position = glm::vec3(0.0f, -1.5f, 0.0f);
+        auto& wlc = waterLight.AddComponent<LightComponent>(LightType::Point);
+        wlc.Color     = glm::vec3(0.15f, 0.55f, 1.0f);
+        wlc.Intensity = 3.5f;
+        wlc.Range     = 8.0f;
+        wlc.SyncToLight();
+
+        // Camera
+        Entity cam = scene->CreateEntity("Tank Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        camTf.Position = glm::vec3(4.5f, 3.0f, 4.5f);  // closer so particles are visible
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-28.0f, 45.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV          = 60.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity({});
+        GE_CORE_INFO("Loaded SPH Water Simulation Demo");
+    }
+
+    // ==================== Robot Arm IK ====================
+
+    void EditorApp::LoadRobotArmDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("Robot Arm (IK)");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // === Checkerboard floor (like old_code/arm-simulation) ===
+        float squareSize = 0.2f;
+        int gridSize = 50;
+        for (int i = 0; i < gridSize; i++) {
+            for (int j = 0; j < gridSize; j++) {
+                bool isLight = (i + j) % 2 == 0;
+                glm::vec3 color = isLight ? glm::vec3(0.8f, 0.8f, 0.8f) : glm::vec3(0.3f, 0.3f, 0.3f);
+                
+                auto tileMesh = MeshGenerator3D::CreatePlane(squareSize, squareSize);
+                std::string name = "Tile_" + std::to_string(i) + "_" + std::to_string(j);
+                Entity tile = scene->CreateEntity(name);
+                auto tMat = CreateRef<Material>(*m_DefaultMaterial);
+                tMat->SetAlbedo(color);
+                tMat->SetRoughness(0.6f);
+                tMat->SetMetallic(0.1f);
+                tile.AddComponent<MeshRendererComponent>(tileMesh, tMat);
+                auto& tf = tile.GetComponent<TransformComponent>();
+                tf.Position = glm::vec3(
+                    (i - gridSize/2) * squareSize,
+                    0.0f,
+                    (j - gridSize/2) * squareSize
+                );
+            }
+        }
+
+        // Pedestal base (like arm-simulation's base)
+        Entity base = scene->CreateEntity("Arm Base");
+        auto bMat = CreateRef<Material>(*m_DefaultMaterial);
+        bMat->SetAlbedo(glm::vec3(0.3f, 0.3f, 0.35f));
+        bMat->SetMetallic(0.6f);
+        bMat->SetRoughness(0.4f);
+        base.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCylinder(0.4f, 0.3f, 16), bMat);
+        base.GetComponent<TransformComponent>().Position = glm::vec3(0, 0.15f, 0);
+
+        // Robot arm with DH-style parameters (like arm-simulation)
+        Entity arm = scene->CreateEntity("Robot Arm");
+        arm.GetComponent<TransformComponent>().Position = glm::vec3(0, 0.3f, 0);
+        auto& rac = arm.AddComponent<RobotArmComponent>();
+        rac.IKEnabled       = true;
+        rac.TargetPosition  = glm::vec3(1.5f, 1.0f, 0.5f);
+        // PID gains like arm-simulation's default (P=0.05, I=0, D=0)
+        rac.Kp              = 0.05f;
+        rac.Ki              = 0.0f;
+        rac.Kd              = 0.02f;
+        rac.IKMaxIterations = 200;
+
+        // IK target marker — bright red sphere (like arm-simulation's IK sphere)
+        Entity target = scene->CreateEntity("IK Target");
+        auto tMat = CreateRef<Material>(*m_DefaultMaterial);
+        tMat->SetAlbedo(glm::vec3(1.0f, 0.2f, 0.2f));  // Red like arm-sim
+        tMat->SetMetallic(0.0f);
+        tMat->SetRoughness(0.3f);
+        target.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.05f, 12, 8), tMat);
+        target.GetComponent<TransformComponent>().Position = rac.TargetPosition;
+
+        // Green transparent sphere (like arm-simulation's sphere)
+        Entity greenSphere = scene->CreateEntity("Reference Sphere");
+        auto gsMat = CreateRef<Material>(*m_DefaultMaterial);
+        gsMat->SetAlbedo(glm::vec3(0.0f, 0.5f, 0.0f));
+        gsMat->SetMetallic(0.1f);
+        gsMat->SetRoughness(0.5f);
+        greenSphere.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.2f, 16, 12), gsMat);
+        greenSphere.GetComponent<TransformComponent>().Position = glm::vec3(0.0f, 0.2f, 0.0f);
+
+        // Moving light (like arm-simulation's rotating light at 6*sin(t), 3.5, 6*cos(t))
+        Entity light = scene->CreateEntity("Moving Light");
+        auto& lTf = light.GetComponent<TransformComponent>();
+        lTf.Position = glm::vec3(6.0f, 3.5f, 6.0f);
+        auto lightMesh = MeshGenerator3D::CreateCube(0.2f);
+        auto lightMat = CreateRef<Material>(*m_DefaultMaterial);
+        lightMat->SetAlbedo(glm::vec3(1.0f, 1.0f, 1.0f));  // White light cube
+        light.AddComponent<MeshRendererComponent>(lightMesh, lightMat);
+        auto& lc = light.AddComponent<LightComponent>(LightType::Point);
+        lc.Color     = glm::vec3(1.0f, 1.0f, 1.0f);
+        lc.Intensity = 3.0f;
+        lc.Range     = 15.0f;
+        lc.SyncToLight();
+
+        // Camera positioned like arm-simulation's gluLookAt
+        Entity cam = scene->CreateEntity("Arm Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        camTf.Position = glm::vec3(4.0f, 2.0f, 4.0f);
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-25.0f, 45.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV          = 50.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity(arm);
+        GE_CORE_INFO("Loaded Robot Arm IK Demo");
+    }
+
+    // ==================== GPU Particle System ====================
+
+    void EditorApp::LoadGPUParticleDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("GPU Particle System");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // === Purple Pyramid Platforms (like old_code/particle-sim) ===
+        // Creates 5 floors forming a stepped pyramid
+        // Positions: y=-15 size=25, y=-12.5 size=20, y=-10 size=15, y=-7.5 size=10, y=-5 size=5
+        float pyramidLevels[][2] = {
+            {-15.0f, 25.0f}, {-12.5f, 20.0f}, {-10.0f, 15.0f}, {-7.5f, 10.0f}, {-5.0f, 5.0f}
+        };
+        int numLevels = 5;
+        for (int i = 0; i < numLevels; i++) {
+            float yPos = pyramidLevels[i][0];
+            float size = pyramidLevels[i][1];
+            
+            Entity platform = scene->CreateEntity("Platform_" + std::to_string(i));
+            auto pMat = CreateRef<Material>(*m_DefaultMaterial);
+            // Purple color (186, 126, 207) with varying alpha-like brightness
+            float brightness = 1.0f - (float(i) / float(numLevels)) * 0.6f;
+            pMat->SetAlbedo(glm::vec3(0.73f * brightness, 0.49f * brightness, 0.81f * brightness));
+            pMat->SetRoughness(0.6f);
+            pMat->SetMetallic(0.2f);
+            
+            auto mesh = MeshGenerator3D::CreateCube(1.0f);
+            platform.AddComponent<MeshRendererComponent>(mesh, pMat);
+            auto& tf = platform.GetComponent<TransformComponent>();
+            tf.Position = glm::vec3(0.0f, yPos, 0.0f);
+            tf.Scale = glm::vec3(size, 0.2f, size);
+        }
+
+        // Central particle emitter (cannon at y=15)
+        Entity fountain = scene->CreateEntity("Particle Cannon");
+        fountain.GetComponent<TransformComponent>().Position = glm::vec3(0.0f, 15.0f, 0.0f);
+        auto& gpu1 = fountain.AddComponent<GPUParticleComponent>();
+        gpu1.MaxParticles = 50000;
+        gpu1.Gravity      = glm::vec3(0.0f, -1.0f, 0.0f);  // Matches old gravity=0.1 scaled
+        gpu1.Restitution  = 0.5f;   // Friction-based bounce
+        gpu1.Damping      = 0.8f;   // 1 - friction(0.2)
+        gpu1.EmitHeight   = 15.0f;  // Cannon position y
+        gpu1.FloorY       = -15.0f; // Lowest platform
+        gpu1.ParticleSize = 0.25f;  // scaleFactor from old code
+        gpu1.EmitRate     = 500;    // Continuous fire rate
+
+        // Corner light (like old code's lightSource at 150,150,150)
+        Entity light = scene->CreateEntity("Corner Light");
+        light.GetComponent<TransformComponent>().Position = glm::vec3(15.0f, 15.0f, 15.0f);
+        auto& lc = light.AddComponent<LightComponent>(LightType::Point);
+        lc.Color     = glm::vec3(1.0f, 1.0f, 1.0f);
+        lc.Intensity = 3.0f;
+        lc.Range     = 50.0f;
+        lc.SyncToLight();
+
+        // Ambient fill light
+        Entity fillLight = scene->CreateEntity("Fill Light");
+        fillLight.GetComponent<TransformComponent>().Position = glm::vec3(-10.0f, 10.0f, -10.0f);
+        fillLight.GetComponent<TransformComponent>().Rotation = glm::quat(glm::radians(glm::vec3(-45.0f, 45.0f, 0.0f)));
+        auto& flc = fillLight.AddComponent<LightComponent>(LightType::Directional);
+        flc.Color     = glm::vec3(0.4f, 0.4f, 0.5f);
+        flc.Intensity = 0.5f;
+        flc.SyncToLight();
+
+        // Camera positioned like old code's gluLookAt
+        Entity cam = scene->CreateEntity("Particle Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        camTf.Position = glm::vec3(50.0f, 25.0f, 50.0f);  // zoom=50, xRotate=25
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-25.0f, -135.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV          = 74.0f;  // From old code's gluPerspective
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity({});
+        GE_CORE_INFO("Loaded GPU Particle System Demo");
+    }
+
+    // ==================== Soft Body (XPBD) ====================
+
+    void EditorApp::LoadSoftBodyDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("Soft Body (XPBD)");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // === Gray ground plane (like old_code/feather) ===
+        Entity ground = scene->CreateEntity("Ground");
+        auto gMat = CreateRef<Material>(*m_DefaultMaterial);
+        gMat->SetAlbedo(glm::vec3(0.5f, 0.5f, 0.5f));  // Gray like feather demo
+        gMat->SetRoughness(0.4f);
+        gMat->SetMetallic(0.5f);
+        ground.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreatePlane(40.0f, 40.0f), gMat);
+        ground.GetComponent<TransformComponent>().Position = glm::vec3(0, 0.0f, 0);
+        auto& gRb = ground.AddComponent<RigidBodyComponent>();
+        gRb.Type = RigidBodyComponent::BodyType::Static;
+        ground.AddComponent<ColliderComponent>(CreateRef<Physics::BoxShape>(glm::vec3(20.0f, 0.1f, 20.0f)));
+
+        // === Primary cloth (like feather's cloth with 32x32 resolution) ===
+        // White/bright cloth like carpet texture
+        Entity cloth = scene->CreateEntity("Cloth");
+        cloth.GetComponent<TransformComponent>().Position = glm::vec3(0.0f, 7.0f, 0.0f);
+        auto clothMesh = MeshGenerator3D::CreatePlane(10.0f, 10.0f, 31, 31);  // 32x32 vertices
+        auto clothMat  = CreateRef<Material>(*m_DefaultMaterial);
+        clothMat->SetAlbedo(glm::vec3(2.0f, 2.0f, 2.0f));  // Bright white like feather
+        clothMat->SetRoughness(0.8f);
+        clothMat->SetMetallic(0.0f);
+        cloth.AddComponent<MeshRendererComponent>(clothMesh, clothMat);
+        auto& sb = cloth.AddComponent<SoftBodyComponent>();
+        sb.GridResX                  = 32;
+        sb.GridResY                  = 32;
+        sb.Width                     = 10.0f;
+        sb.Height                    = 10.0f;
+        sb.Mass                      = 1.0f;
+        sb.Damping                   = 0.9f;   // Like feather's damping
+        sb.SubSteps                  = 4;      // 4 iterations like feather
+        sb.EnableDistanceConstraints = true;
+        sb.EnableBendConstraints     = true;
+        sb.EnableVolumeConstraints   = false;  // Cloth doesn't need volume
+        sb.EnableCollisionConstraints= true;
+        sb.DistanceCompliance        = 0.1f;   // stretchCompliance
+        sb.BendCompliance            = 0.01f;  // bendCompliance
+        sb.SetMesh(clothMesh);
+
+        // === Orange cube (like feather's cube) ===
+        Entity cube = scene->CreateEntity("Orange Cube");
+        cube.GetComponent<TransformComponent>().Position = glm::vec3(5.0f, 4.0f, -8.0f);
+        auto cubeMesh = MeshGenerator3D::CreateCube(1.0f);
+        auto cubeMat = CreateRef<Material>(*m_DefaultMaterial);
+        cubeMat->SetAlbedo(glm::vec3(1.0f, 0.6f, 0.0f));  // Orange like feather
+        cubeMat->SetMetallic(0.2f);
+        cubeMat->SetRoughness(0.8f);
+        cube.AddComponent<MeshRendererComponent>(cubeMesh, cubeMat);
+        auto& cubeRb = cube.AddComponent<RigidBodyComponent>();
+        cubeRb.Type = RigidBodyComponent::BodyType::Dynamic;
+        cubeRb.Mass = 1.0f;
+        cube.AddComponent<ColliderComponent>(CreateRef<Physics::BoxShape>(glm::vec3(0.5f)));
+
+        // === Soft sphere (like feather's soft earth sphere) ===
+        Entity sphere = scene->CreateEntity("Soft Sphere");
+        sphere.GetComponent<TransformComponent>().Position = glm::vec3(0.0f, 9.0f, 0.0f);
+        sphere.GetComponent<TransformComponent>().Scale = glm::vec3(1.5f);
+        auto sphereMesh = MeshGenerator3D::CreateSphere(1.0f, 16, 16);
+        auto sphereMat = CreateRef<Material>(*m_DefaultMaterial);
+        sphereMat->SetAlbedo(glm::vec3(0.3f, 0.6f, 0.9f));  // Blue-ish
+        sphereMat->SetMetallic(0.2f);
+        sphereMat->SetRoughness(0.6f);
+        sphere.AddComponent<MeshRendererComponent>(sphereMesh, sphereMat);
+        auto& sphereSb = sphere.AddComponent<SoftBodyComponent>();
+        sphereSb.GridResX = 16;
+        sphereSb.GridResY = 16;
+        sphereSb.Width = 2.0f;
+        sphereSb.Height = 2.0f;
+        sphereSb.Mass = 1.0f;
+        sphereSb.Damping = 0.95f;
+        sphereSb.SubSteps = 4;
+        sphereSb.EnableDistanceConstraints = true;
+        sphereSb.EnableVolumeConstraints = true;
+        sphereSb.DistanceCompliance = 0.0001f;
+        sphereSb.SetMesh(sphereMesh);
+
+        // === Blue bunny-like soft object ===
+        Entity bunny = scene->CreateEntity("Soft Object");
+        bunny.GetComponent<TransformComponent>().Position = glm::vec3(10.0f, 3.0f, -8.0f);
+        auto bunnyMesh = MeshGenerator3D::CreatePlane(2.0f, 2.0f, 15, 15);
+        auto bunnyMat = CreateRef<Material>(*m_DefaultMaterial);
+        bunnyMat->SetAlbedo(glm::vec3(0.4f, 0.4f, 1.0f));  // Blue like feather's bunny
+        bunnyMat->SetMetallic(0.1f);
+        bunnyMat->SetRoughness(0.8f);
+        bunny.AddComponent<MeshRendererComponent>(bunnyMesh, bunnyMat);
+        auto& bunnySb = bunny.AddComponent<SoftBodyComponent>();
+        bunnySb.GridResX = 16;
+        bunnySb.GridResY = 16;
+        bunnySb.Width = 2.0f;
+        bunnySb.Height = 2.0f;
+        bunnySb.Mass = 1.0f;
+        bunnySb.Damping = 0.95f;
+        bunnySb.SubSteps = 4;
+        bunnySb.EnableDistanceConstraints = true;
+        bunnySb.SetMesh(bunnyMesh);
+
+        // === Directional light (rotating sun like feather) ===
+        Entity sun = scene->CreateEntity("Sun");
+        auto& sunTf = sun.GetComponent<TransformComponent>();
+        sunTf.Position = glm::vec3(-1.0f, 1.0f, 0.0f);  // Direction like feather
+        sunTf.Rotation = glm::quat(glm::radians(glm::vec3(-45.0f, 45.0f, 0.0f)));
+        auto& lc = sun.AddComponent<LightComponent>(LightType::Directional);
+        lc.Intensity = 2.0f;
+        lc.Color     = glm::vec3(1.0f, 1.0f, 1.0f);
+        lc.SyncToLight();
+
+        // === Orbit camera (like feather demo) ===
+        Entity cam = scene->CreateEntity("Demo Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        // Position like feather's OrbitCamera: radius=20, theta=-pi/4, phi=pi/3
+        camTf.Position = glm::vec3(14.0f, 12.0f, 14.0f);
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-35.0f, 45.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV          = 45.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity({});
+        GE_CORE_INFO("Loaded Soft Body (XPBD) Demo");
+    }
+
+    // ==================== Joints & Constraints ====================
+
+    void EditorApp::LoadJointsDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("Joints & Constraints");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // Ground
+        Entity ground = scene->CreateEntity("Ground");
+        auto gMat = CreateRef<Material>(*m_DefaultMaterial);
+        gMat->SetAlbedo(glm::vec3(0.25f, 0.25f, 0.28f));
+        gMat->SetRoughness(0.7f);
+        ground.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreatePlane(14.0f, 14.0f), gMat);
+        ground.GetComponent<TransformComponent>().Position = glm::vec3(0, -4.5f, 0);
+
+        // ---- Pendulum chain (5 links) ----
+        auto metalMat = CreateRef<Material>(*m_DefaultMaterial);
+        metalMat->SetAlbedo(glm::vec3(0.5f, 0.5f, 0.55f));
+        metalMat->SetMetallic(0.9f);
+        metalMat->SetRoughness(0.2f);
+
+        // Ceiling beam (visual)
+        Entity beam = scene->CreateEntity("Ceiling Beam");
+        beam.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCube(1.0f), metalMat);
+        auto& beamTf = beam.GetComponent<TransformComponent>();
+        beamTf.Position = glm::vec3(-2.0f, 4.5f, 0.0f);
+        beamTf.Scale    = glm::vec3(4.0f, 0.15f, 0.15f);
+        auto& beamRb = beam.AddComponent<RigidBodyComponent>();
+        beamRb.Type = RigidBodyComponent::BodyType::Static;
+
+        // Static anchor the chain hangs from
+        Entity anchor = scene->CreateEntity("Chain Anchor");
+        anchor.GetComponent<TransformComponent>().Position = glm::vec3(-2.0f, 4.0f, 0.0f);
+        auto& ancRb = anchor.AddComponent<RigidBodyComponent>();
+        ancRb.Type = RigidBodyComponent::BodyType::Static;
+
+        glm::vec3 linkColors[] = {
+            {0.9f, 0.2f, 0.2f}, {0.9f, 0.6f, 0.1f}, {0.2f, 0.8f, 0.3f},
+            {0.2f, 0.5f, 0.9f}, {0.7f, 0.2f, 0.9f}
+        };
+        Entity prev = anchor;
+        for (int i = 0; i < 5; i++) {
+            Entity link = scene->CreateEntity("Link_" + std::to_string(i));
+            auto lMat = CreateRef<Material>(*m_DefaultMaterial);
+            lMat->SetAlbedo(linkColors[i]);
+            lMat->SetMetallic(0.6f);
+            lMat->SetRoughness(0.3f);
+            link.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.22f, 14, 8), lMat);
+            auto& tf = link.GetComponent<TransformComponent>();
+            tf.Position = glm::vec3(-2.0f, 4.0f - (i + 1) * 0.9f, 0.0f);
+            auto& rb = link.AddComponent<RigidBodyComponent>();
+            rb.Mass           = 0.5f;
+            rb.LinearDamping  = 0.05f;
+            rb.AngularDamping = 0.1f;
+            rb.UseGravity     = true;
+            auto& jc = link.AddComponent<JointComponent>();
+            jc.Type              = JointComponent::JointType::Distance;
+            jc.ConnectedEntityID = static_cast<uint64_t>(prev.GetUUID());
+            jc.Distance          = 0.9f;
+            jc.AnchorA           = glm::vec3(0.0f,  0.22f, 0.0f);
+            jc.AnchorB           = glm::vec3(0.0f, -0.22f, 0.0f);
+            jc.IsSpring          = false;
+            prev = link;
+        }
+
+        // ---- Hinge pendulum (single heavy bob with angular limits) ----
+        Entity hingeAnchor = scene->CreateEntity("Hinge Anchor");
+        hingeAnchor.GetComponent<TransformComponent>().Position = glm::vec3(2.5f, 4.0f, 0.0f);
+        auto& haRb = hingeAnchor.AddComponent<RigidBodyComponent>();
+        haRb.Type = RigidBodyComponent::BodyType::Static;
+
+        Entity hingeBob = scene->CreateEntity("Hinge Bob");
+        auto hbMat = CreateRef<Material>(*m_DefaultMaterial);
+        hbMat->SetAlbedo(glm::vec3(1.0f, 0.8f, 0.1f));
+        hbMat->SetMetallic(0.9f);
+        hbMat->SetRoughness(0.1f);
+        hingeBob.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.4f, 16, 10), hbMat);
+        hingeBob.GetComponent<TransformComponent>().Position = glm::vec3(2.5f, 1.0f, 0.0f);
+        auto& hbRb = hingeBob.AddComponent<RigidBodyComponent>();
+        hbRb.Mass          = 2.0f;
+        hbRb.LinearDamping = 0.05f;
+        auto& hjc = hingeBob.AddComponent<JointComponent>();
+        hjc.Type              = JointComponent::JointType::Hinge;
+        hjc.ConnectedEntityID = static_cast<uint64_t>(hingeAnchor.GetUUID());
+        hjc.Axis              = glm::vec3(0.0f, 0.0f, 1.0f);
+        hjc.Distance          = 3.0f;
+        hjc.UseAngularLimits  = true;
+        hjc.LowerAngularLimit = glm::radians(-80.0f);
+        hjc.UpperAngularLimit = glm::radians( 80.0f);
+
+        // ---- Spring pendulum ----
+        Entity springAnchor = scene->CreateEntity("Spring Anchor");
+        springAnchor.GetComponent<TransformComponent>().Position = glm::vec3(-5.5f, 4.0f, 0.0f);
+        auto& saRb = springAnchor.AddComponent<RigidBodyComponent>();
+        saRb.Type = RigidBodyComponent::BodyType::Static;
+
+        Entity springBob = scene->CreateEntity("Spring Bob");
+        auto sbMat = CreateRef<Material>(*m_DefaultMaterial);
+        sbMat->SetAlbedo(glm::vec3(0.1f, 0.9f, 0.6f));
+        sbMat->SetMetallic(0.5f);
+        sbMat->SetRoughness(0.3f);
+        springBob.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.35f, 14, 8), sbMat);
+        springBob.GetComponent<TransformComponent>().Position = glm::vec3(-5.5f, 1.2f, 0.0f);
+        auto& sbRb = springBob.AddComponent<RigidBodyComponent>();
+        sbRb.Mass          = 1.2f;
+        sbRb.LinearDamping = 0.1f;
+        auto& sjc = springBob.AddComponent<JointComponent>();
+        sjc.Type              = JointComponent::JointType::Distance;
+        sjc.ConnectedEntityID = static_cast<uint64_t>(springAnchor.GetUUID());
+        sjc.Distance          = 2.8f;
+        sjc.IsSpring          = true;
+        sjc.SpringStiffness   = 60.0f;
+        sjc.SpringDamping     = 4.0f;
+
+        // Directional light
+        Entity sun = scene->CreateEntity("Sun");
+        sun.GetComponent<TransformComponent>().Rotation =
+            glm::quat(glm::radians(glm::vec3(-50.0f, 30.0f, 0.0f)));
+        auto& lc = sun.AddComponent<LightComponent>(LightType::Directional);
+        lc.Intensity = 2.0f;
+        lc.Color     = glm::vec3(1.0f, 0.97f, 0.9f);
+        lc.SyncToLight();
+
+        // Camera
+        Entity cam = scene->CreateEntity("Demo Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        camTf.Position = glm::vec3(0.0f, 3.5f, 10.0f);
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-10.0f, 0.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV          = 55.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity({});
+        GE_CORE_INFO("Loaded Joints & Constraints Demo");
+    }
+
+    // ==================== Character / Platformer Level ====================
+
+    void EditorApp::LoadCharacterDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("Character Demo");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // Ground
+        Entity ground = scene->CreateEntity("Ground");
+        auto gMat = CreateRef<Material>(*m_DefaultMaterial);
+        gMat->SetAlbedo(glm::vec3(0.4f, 0.55f, 0.35f));
+        gMat->SetRoughness(0.85f);
+        ground.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreatePlane(20.0f, 20.0f), gMat);
+        ground.GetComponent<TransformComponent>().Position = glm::vec3(0, -0.05f, 0);
+        auto& gRb = ground.AddComponent<RigidBodyComponent>();
+        gRb.Type = RigidBodyComponent::BodyType::Static;
+        ground.AddComponent<ColliderComponent>(
+            CreateRef<Physics::BoxShape>(glm::vec3(10.0f, 0.05f, 10.0f)));
+
+        // Staircase — 6 ascending steps
+        auto stepMat = CreateRef<Material>(*m_DefaultMaterial);
+        stepMat->SetAlbedo(glm::vec3(0.65f, 0.55f, 0.45f));
+        stepMat->SetRoughness(0.75f);
+        for (int i = 0; i < 6; i++) {
+            float stepH = (i + 1) * 0.3f;
+            Entity step = scene->CreateEntity("Step_" + std::to_string(i));
+            step.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCube(1.0f), stepMat);
+            auto& tf = step.GetComponent<TransformComponent>();
+            tf.Position = glm::vec3(1.0f + i * 1.2f, stepH * 0.5f, 0.0f);
+            tf.Scale    = glm::vec3(1.2f, stepH, 2.0f);
+            auto& rb = step.AddComponent<RigidBodyComponent>();
+            rb.Type = RigidBodyComponent::BodyType::Static;
+            step.AddComponent<ColliderComponent>(
+                CreateRef<Physics::BoxShape>(glm::vec3(0.6f, stepH * 0.5f, 1.0f)));
+        }
+
+        // Floating kinematic platforms
+        auto platMat = CreateRef<Material>(*m_DefaultMaterial);
+        platMat->SetAlbedo(glm::vec3(0.3f, 0.5f, 0.8f));
+        platMat->SetMetallic(0.4f);
+        platMat->SetRoughness(0.5f);
+
+        Entity platform1 = scene->CreateEntity("Moving Platform A");
+        platform1.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCube(1.0f), platMat);
+        auto& p1Tf = platform1.GetComponent<TransformComponent>();
+        p1Tf.Position = glm::vec3(10.0f, 1.5f, -2.0f);
+        p1Tf.Scale    = glm::vec3(3.0f, 0.3f, 3.0f);
+        auto& p1Rb = platform1.AddComponent<RigidBodyComponent>();
+        p1Rb.Type = RigidBodyComponent::BodyType::Kinematic;
+        platform1.AddComponent<ColliderComponent>(
+            CreateRef<Physics::BoxShape>(glm::vec3(1.5f, 0.15f, 1.5f)));
+
+        Entity platform2 = scene->CreateEntity("Moving Platform B");
+        platform2.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCube(1.0f), platMat);
+        auto& p2Tf = platform2.GetComponent<TransformComponent>();
+        p2Tf.Position = glm::vec3(14.0f, 3.0f, 2.0f);
+        p2Tf.Scale    = glm::vec3(3.0f, 0.3f, 3.0f);
+        auto& p2Rb = platform2.AddComponent<RigidBodyComponent>();
+        p2Rb.Type = RigidBodyComponent::BodyType::Kinematic;
+        platform2.AddComponent<ColliderComponent>(
+            CreateRef<Physics::BoxShape>(glm::vec3(1.5f, 0.15f, 1.5f)));
+
+        // Goal marker (bright cyan sphere)
+        Entity goal = scene->CreateEntity("Goal");
+        auto goalMat = CreateRef<Material>(*m_DefaultMaterial);
+        goalMat->SetAlbedo(glm::vec3(0.1f, 1.0f, 0.8f));
+        goalMat->SetMetallic(0.0f);
+        goalMat->SetRoughness(0.2f);
+        goal.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.4f, 16, 10), goalMat);
+        goal.GetComponent<TransformComponent>().Position = glm::vec3(14.0f, 4.0f, 2.0f);
+
+        // Goal glow light
+        Entity goalLight = scene->CreateEntity("Goal Light");
+        goalLight.GetComponent<TransformComponent>().Position = glm::vec3(14.0f, 5.0f, 2.0f);
+        auto& glc = goalLight.AddComponent<LightComponent>(LightType::Point);
+        glc.Color     = glm::vec3(0.1f, 1.0f, 0.8f);
+        glc.Intensity = 3.0f;
+        glc.Range     = 5.0f;
+        glc.SyncToLight();
+
+        // Player sphere (dynamic rigid body)
+        Entity player = scene->CreateEntity("Player");
+        auto playerMat = CreateRef<Material>(*m_DefaultMaterial);
+        playerMat->SetAlbedo(glm::vec3(0.9f, 0.3f, 0.2f));
+        playerMat->SetMetallic(0.1f);
+        playerMat->SetRoughness(0.6f);
+        player.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.4f, 20, 12), playerMat);
+        player.GetComponent<TransformComponent>().Position = glm::vec3(-1.0f, 0.8f, 0.0f);
+        auto& pRb = player.AddComponent<RigidBodyComponent>();
+        pRb.Type          = RigidBodyComponent::BodyType::Dynamic;
+        pRb.Mass          = 1.0f;
+        pRb.LinearDamping = 0.3f;
+        pRb.UseGravity    = true;
+        player.AddComponent<ColliderComponent>(CreateRef<Physics::SphereShape>(0.4f));
+
+        // Sun
+        Entity sun = scene->CreateEntity("Sun");
+        sun.GetComponent<TransformComponent>().Rotation =
+            glm::quat(glm::radians(glm::vec3(-50.0f, 35.0f, 0.0f)));
+        auto& lc = sun.AddComponent<LightComponent>(LightType::Directional);
+        lc.Intensity = 2.5f;
+        lc.Color     = glm::vec3(1.0f, 0.97f, 0.88f);
+        lc.SyncToLight();
+
+        // Cool blue fill
+        Entity fill = scene->CreateEntity("Fill Light");
+        fill.GetComponent<TransformComponent>().Position = glm::vec3(-5.0f, 5.0f, -5.0f);
+        auto& flc = fill.AddComponent<LightComponent>(LightType::Point);
+        flc.Color     = glm::vec3(0.4f, 0.6f, 1.0f);
+        flc.Intensity = 1.5f;
+        flc.Range     = 20.0f;
+        flc.SyncToLight();
+
+        // Camera overlooking the level
+        Entity cam = scene->CreateEntity("Level Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        camTf.Position = glm::vec3(6.0f, 8.0f, 14.0f);
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-25.0f, 0.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV          = 60.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity(player);
+        GE_CORE_INFO("Loaded Character Demo");
+    }
+
+    // ==================== Verlet Cloth Demo ====================
+    // Based on old_code/src/main2D.cpp - Verlet Integration Physics
+    // Demonstrates: Verlet integration (pos = pos + (pos - oldPos) + acc*dt²),
+    //               Distance constraints, Cloth simulation, Projectile physics
+    
+    void EditorApp::LoadVerletClothDemo() {
+        if (m_EditorContext && !m_EditorContext->IsEditing()) m_EditorContext->Stop();
+
+        auto editorScene = std::make_unique<EditorScene>();
+        editorScene->m_ID = m_NextSceneID++;
+        editorScene->m_Scene = CreateRef<Scene>("Verlet Cloth");
+        editorScene->m_HasUnsavedChanges = true;
+        m_Scenes.push_back(std::move(editorScene));
+        SetCurrentScene(static_cast<int>(m_Scenes.size() - 1));
+
+        auto scene = GetCurrentScene();
+        if (!scene || !m_DefaultMaterial) return;
+
+        // === Dark background ground (like main2D's sf::Color(30, 30, 30)) ===
+        Entity ground = scene->CreateEntity("Ground");
+        auto gMat = CreateRef<Material>(*m_DefaultMaterial);
+        gMat->SetAlbedo(glm::vec3(0.12f, 0.12f, 0.12f));  // Dark like main2D
+        gMat->SetRoughness(0.8f);
+        gMat->SetMetallic(0.1f);
+        ground.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreatePlane(30.0f, 20.0f), gMat);
+        ground.GetComponent<TransformComponent>().Position = glm::vec3(0, 0, 0);
+        auto& gRb = ground.AddComponent<RigidBodyComponent>();
+        gRb.Type = RigidBodyComponent::BodyType::Static;
+        ground.AddComponent<ColliderComponent>(CreateRef<Physics::BoxShape>(glm::vec3(15.0f, 0.1f, 10.0f)));
+
+        // === Cannon base (like main2D's circular base in blue) ===
+        Entity cannonBase = scene->CreateEntity("Cannon Base");
+        auto baseMat = CreateRef<Material>(*m_DefaultMaterial);
+        baseMat->SetAlbedo(glm::vec3(0.0f, 0.0f, 0.6f));  // Blue base
+        baseMat->SetMetallic(0.5f);
+        baseMat->SetRoughness(0.4f);
+        cannonBase.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCylinder(0.5f, 0.3f, 16), baseMat);
+        cannonBase.GetComponent<TransformComponent>().Position = glm::vec3(-5.0f, 0.15f, 0.0f);
+
+        // === Cannon barrel (like main2D's red barrel at -45°) ===
+        Entity barrel = scene->CreateEntity("Cannon Barrel");
+        auto barrelMat = CreateRef<Material>(*m_DefaultMaterial);
+        barrelMat->SetAlbedo(glm::vec3(0.6f, 0.0f, 0.0f));  // Red barrel
+        barrelMat->SetMetallic(0.6f);
+        barrelMat->SetRoughness(0.3f);
+        barrel.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCylinder(0.15f, 1.5f, 16), barrelMat);
+        auto& barrelTf = barrel.GetComponent<TransformComponent>();
+        barrelTf.Position = glm::vec3(-4.5f, 0.3f, 0.0f);
+        barrelTf.Rotation = glm::quat(glm::radians(glm::vec3(0.0f, 0.0f, -45.0f)));
+
+        // === Verlet Cloth (20x15 particle grid using Verlet integration) ===
+        // This uses SoftBodyComponent which internally uses Verlet-style position updates
+        Entity cloth = scene->CreateEntity("Verlet Cloth");
+        cloth.GetComponent<TransformComponent>().Position = glm::vec3(4.0f, 7.0f, 0.0f);
+        auto clothMesh = MeshGenerator3D::CreatePlane(6.0f, 4.5f, 19, 14);  // 20x15 vertices
+        auto clothMat = CreateRef<Material>(*m_DefaultMaterial);
+        clothMat->SetAlbedo(glm::vec3(1.0f, 1.0f, 1.0f));  // White cloth
+        clothMat->SetRoughness(0.8f);
+        clothMat->SetMetallic(0.0f);
+        cloth.AddComponent<MeshRendererComponent>(clothMesh, clothMat);
+        auto& clothSb = cloth.AddComponent<SoftBodyComponent>();
+        clothSb.GridResX = 20;
+        clothSb.GridResY = 15;
+        clothSb.Width = 6.0f;
+        clothSb.Height = 4.5f;
+        clothSb.Mass = 1.0f;
+        clothSb.Damping = 0.99f;  // Verlet damping (pos - oldPos) * damping
+        clothSb.SubSteps = 5;     // Constraint solver iterations
+        clothSb.EnableDistanceConstraints = true;
+        clothSb.EnableBendConstraints = true;
+        clothSb.DistanceCompliance = 0.0f;  // Stiff distance constraints
+        clothSb.BendCompliance = 0.001f;
+        clothSb.SetMesh(clothMesh);
+
+        // === Projectile balls (like main2D's randomly colored Ball2D objects) ===
+        // These use rigid body physics to interact with the cloth
+        glm::vec3 ballColors[] = {
+            {0.9f, 0.2f, 0.2f},   // Red
+            {0.2f, 0.9f, 0.3f},   // Green  
+            {0.2f, 0.3f, 0.9f},   // Blue
+            {0.9f, 0.9f, 0.2f},   // Yellow
+            {0.9f, 0.2f, 0.9f}    // Magenta
+        };
+        for (int i = 0; i < 5; i++) {
+            Entity ball = scene->CreateEntity("Ball_" + std::to_string(i));
+            auto ballMat = CreateRef<Material>(*m_DefaultMaterial);
+            ballMat->SetAlbedo(ballColors[i]);
+            ballMat->SetRoughness(0.3f);
+            ballMat->SetMetallic(0.2f);
+            ball.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.3f, 16, 10), ballMat);
+            auto& ballTf = ball.GetComponent<TransformComponent>();
+            // Position along cannon trajectory (parabolic arc)
+            float t = float(i) / 4.0f;
+            ballTf.Position = glm::vec3(-4.0f + t * 8.0f, 0.8f + t * 6.0f - t * t * 4.0f, 0.0f);
+            auto& ballRb = ball.AddComponent<RigidBodyComponent>();
+            ballRb.Type = RigidBodyComponent::BodyType::Dynamic;
+            ballRb.Mass = 2.0f;
+            ballRb.UseGravity = true;
+            ballRb.Restitution = 0.8f;  // Bouncy like main2D
+            ball.AddComponent<ColliderComponent>(CreateRef<Physics::SphereShape>(0.3f));
+        }
+
+        // === Reference circle (green marker like main2D's referenceCircle) ===
+        Entity refCircle = scene->CreateEntity("Reference Marker");
+        auto refMat = CreateRef<Material>(*m_DefaultMaterial);
+        refMat->SetAlbedo(glm::vec3(0.0f, 1.0f, 0.0f));  // Green
+        refMat->SetRoughness(0.4f);
+        refCircle.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateSphere(0.3f, 12, 8), refMat);
+        refCircle.GetComponent<TransformComponent>().Position = glm::vec3(-7.0f, 0.5f, -3.0f);
+
+        // === Power bar indicator (green bar like main2D) ===
+        Entity powerBar = scene->CreateEntity("Power Indicator");
+        auto powerMat = CreateRef<Material>(*m_DefaultMaterial);
+        powerMat->SetAlbedo(glm::vec3(0.0f, 0.8f, 0.0f));  // Green power bar
+        powerMat->SetMetallic(0.0f);
+        powerMat->SetRoughness(0.5f);
+        powerBar.AddComponent<MeshRendererComponent>(MeshGenerator3D::CreateCube(1.0f), powerMat);
+        auto& powerTf = powerBar.GetComponent<TransformComponent>();
+        powerTf.Position = glm::vec3(-5.0f, 0.7f, 0.0f);
+        powerTf.Scale = glm::vec3(1.5f, 0.1f, 0.2f);
+
+        // === Sun directional light ===
+        Entity sun = scene->CreateEntity("Sun");
+        sun.GetComponent<TransformComponent>().Rotation =
+            glm::quat(glm::radians(glm::vec3(-45.0f, 30.0f, 0.0f)));
+        auto& lc = sun.AddComponent<LightComponent>(LightType::Directional);
+        lc.Intensity = 2.0f;
+        lc.Color = glm::vec3(1.0f, 1.0f, 1.0f);
+        lc.SyncToLight();
+
+        // === 2D-style side view camera ===
+        Entity cam = scene->CreateEntity("Side Camera");
+        auto& camTf = cam.GetComponent<TransformComponent>();
+        camTf.Position = glm::vec3(0.0f, 4.0f, 15.0f);  // Side view
+        camTf.Rotation = glm::quat(glm::radians(glm::vec3(-10.0f, 0.0f, 0.0f)));
+        auto& cc = cam.AddComponent<CameraComponent>();
+        cc.IsMainCamera = true;
+        cc.FOV = 50.0f;
+
+        if (m_SceneHierarchyPanel) m_SceneHierarchyPanel->SetSelectedEntity(cloth);
+        GE_CORE_INFO("Loaded Verlet Cloth Demo (based on old_code/main2D - Verlet integration)");
+    }
+
+    void EditorApp::LoadCannonShootingDemo() {
+        // Same as Verlet Cloth Demo (cannon + cloth from old_code/main2D.cpp)
+        LoadVerletClothDemo();
+    }
+
+} // namespace GameEngine
 
 // Entry point
 GameEngine::Application* GameEngine::CreateApplication() {

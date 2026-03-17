@@ -1,119 +1,112 @@
 #pragma once
 
 #include "Component.hpp"
-#include "../../Physics/Fluids/SPHSolver.hpp"
+#include "../../Physics/Fluids/SPHFluidSolver.hpp"  // upgraded solver (matches old_code params)
 #include <glm/glm.hpp>
+#include <vector>
 
 namespace GameEngine {
 
     /**
-     * @brief Component for fluid particle emission
-     * 
-     * Emits fluid particles from a point, with configurable rate,
-     * velocity, and spread. Works with the SPH fluid solver.
+     * @brief Component for SPH fluid simulation.
+     *
+     * Supports two usage modes:
+     *   1. Block init  — call InitWaterBlock(nx, ny, nz) to spawn a column of water
+     *                    exactly like old_code/src/sph_water.cpp
+     *   2. Emitter     — set Emitting=true, configure EmissionRate for continuous flow
+     *
+     * Uses SPHFluidSolver (tuned h=0.045, k=1.6, visc=0.15) ported from old code.
      */
     class FluidEmitterComponent : public Component {
     public:
-        /**
-         * @brief Emitter shape type
-         */
         enum class EmitterShape {
             Point = 0,
             Box,
             Sphere
         };
-        
+
         FluidEmitterComponent() = default;
         ~FluidEmitterComponent() = default;
-        
+
         COMPONENT_TYPE(FluidEmitterComponent)
-        
+
         nlohmann::json Serialize() const override;
         void Deserialize(const nlohmann::json& data) override;
-        
+
+        // -----------------------------------------------------------------------
+        // Solver access
+        // -----------------------------------------------------------------------
+        Ref<Physics::SPHFluidSolver> GetSolver() const { return m_Solver; }
+
         /**
-         * @brief Get the fluid solver
+         * @brief Spawn a rectangular block of water (ported from old_code/src/sph_water.cpp).
+         *        Call this instead of Emitting=true if you want a water-column effect.
+         * @param nx/ny/nz  Grid cell counts in each axis
+         * @param spacing   Particle spacing (default ≈ SmoothingLength * 0.62)
          */
-        Ref<Physics::SPHSolver> GetSolver() const { return m_Solver; }
-        
-        /**
-         * @brief Set external solver (shared between multiple emitters)
-         */
-        void SetSolver(const Ref<Physics::SPHSolver>& solver) { m_Solver = solver; }
-        
-        /**
-         * @brief Emitter properties
-         */
-        EmitterShape Shape = EmitterShape::Point;
-        
-        // Emission rate (particles per second)
-        float EmissionRate = 100.0f;
-        
-        // Initial velocity
-        glm::vec3 InitialVelocity = glm::vec3(0, -1, 0);
-        float VelocityRandomness = 0.2f;
-        
-        // Shape dimensions
-        glm::vec3 BoxSize = glm::vec3(1, 1, 1);
-        float SphereRadius = 0.5f;
-        
-        // Particle lifetime (0 = infinite)
-        float ParticleLifetime = 0.0f;
-        
-        // Simulation bounds
-        glm::vec3 BoundsMin = glm::vec3(-10, -10, -10);
-        glm::vec3 BoundsMax = glm::vec3(10, 10, 10);
-        
-        // Fluid properties
-        float ParticleMass = 1.0f;
-        float RestDensity = 1000.0f;
-        float Viscosity = 0.018f;
-        float SurfaceTension = 0.0728f;
-        
-        // State
-        bool Emitting = true;
+        void InitWaterBlock(int nx = 20, int ny = 15, int nz = 10, float spacing = 0.028f);
+
+        // -----------------------------------------------------------------------
+        // Emitter properties
+        // -----------------------------------------------------------------------
+        EmitterShape Shape            = EmitterShape::Box;
+        float        EmissionRate     = 300.0f;        // particles/second
+        glm::vec3    InitialVelocity  = glm::vec3(0, -1, 0);
+        float        VelocityRandomness = 0.1f;
+        glm::vec3    BoxSize          = glm::vec3(1, 1, 1);
+        float        SphereRadius     = 0.5f;
+        float        ParticleLifetime = 0.0f;          // 0 = infinite
+
+        // Simulation domain (passed to SPHFluidSolver)
+        glm::vec3 BoundsMin = glm::vec3(-2, -2, -2);
+        glm::vec3 BoundsMax = glm::vec3( 2,  2,  2);
+
+        // SPH tuning (written to solver on OnCreate / at runtime)
+        float SmoothingLength      = 0.045f;
+        float RestDensity          = 1000.0f;
+        float PressureCoefficient  = 1.6f;
+        float ViscosityCoefficient = 0.15f;
+        float BounceCoefficient    = 0.4f;
+        float ParticleSize         = 0.014f;  // visual render radius
+
+        // Control flags
+        bool Emitting          = false;  // off by default — use InitWaterBlock instead
         bool SimulationEnabled = true;
-        
-        // Max particles
-        int MaxParticles = 5000;
-        
-        /**
-         * @brief Lifecycle callbacks
-         */
-        void OnCreate();
-        void OnFixedUpdate(float fixedDeltaTime);
-        void OnDestroy();
-        
-        /**
-         * @brief Emit a burst of particles
-         */
+        int  MaxParticles      = 10000;
+
+        // Block-init parameters — used automatically in OnCreate() when Emitting=false
+        int   InitBlockNx      = 16;
+        int   InitBlockNy      = 12;
+        int   InitBlockNz      = 12;
+        float InitBlockSpacing = 0.06f; // must be ≤ SmoothingLength*1.5 for kernels to overlap
+
+        // -----------------------------------------------------------------------
+        // Runtime queries
+        // -----------------------------------------------------------------------
         void EmitBurst(int count);
-        
-        /**
-         * @brief Get particle count
-         */
-        int GetParticleCount() const;
-        
-        /**
-         * @brief Get particle positions for rendering
-         */
+        int  GetParticleCount() const;
+
+        /** Convenience: extract particle world-positions for rendering */
+        std::vector<glm::vec3> GetParticlePositions() const;
+
         const std::vector<Physics::FluidParticle>& GetParticles() const;
-        
-        /**
-         * @brief Clear all particles
-         */
         void Clear();
-        
+
+        // -----------------------------------------------------------------------
+        // ECS lifecycle
+        // -----------------------------------------------------------------------
+        void OnCreate() override;
+        void OnFixedUpdate(float fixedDeltaTime) override;
+        void OnDestroy() override;
+
     private:
         glm::vec3 GetEmitPosition() const;
         glm::vec3 GetEmitVelocity() const;
-        
-        Ref<Physics::SPHSolver> m_Solver;
-        float m_EmissionAccumulator = 0.0f;
-        
-        // Random number generation helpers
-        float RandomFloat(float min, float max) const;
+        float     RandomFloat(float min, float max) const;
         glm::vec3 RandomInUnitSphere() const;
+
+        Ref<Physics::SPHFluidSolver> m_Solver;
+        float m_EmissionAccumulator = 0.0f;
     };
 
 }

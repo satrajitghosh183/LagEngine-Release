@@ -12,9 +12,9 @@ namespace GameEngine {
         m_Height = height;
 
         glGenFramebuffers(1, &m_FBO);
-        CreateTextures();
+        if (m_FBO) CreateTextures();
 
-        Logger::EngineLog(LogLevel::Info,
+        Logger::Log(LogLevel::Info,
             "GBuffer initialized (" + std::to_string(m_Width) + "x" + std::to_string(m_Height) + ")");
     }
 
@@ -32,9 +32,9 @@ namespace GameEngine {
         if (m_MetallicRoughnessTexture) glDeleteTextures(1, &m_MetallicRoughnessTexture);
         if (m_DepthTexture)    glDeleteTextures(1, &m_DepthTexture);
 
-        CreateTextures();
+        if (m_FBO) CreateTextures();
 
-        Logger::EngineLog(LogLevel::Debug,
+        Logger::Log(LogLevel::Debug,
             "GBuffer resized to " + std::to_string(m_Width) + "x" + std::to_string(m_Height));
     }
 
@@ -103,7 +103,7 @@ namespace GameEngine {
         // Verify framebuffer completeness
         GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
         if (status != GL_FRAMEBUFFER_COMPLETE) {
-            Logger::EngineLog(LogLevel::Error,
+            Logger::Log(LogLevel::Error,
                 "GBuffer framebuffer incomplete! Status: " + std::to_string(status));
         }
 

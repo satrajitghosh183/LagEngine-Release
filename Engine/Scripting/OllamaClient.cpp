@@ -2,12 +2,39 @@
 #include "Core/HttpClient.hpp"
 #include "Core/Logger.hpp"
 #include <sstream>
+#include <cstdlib>
 
 namespace GameEngine {
 
-    OllamaClient::OllamaClient() {}
+    static void ApplyEnvironmentOverrides(OllamaConfig& config) {
+        // OLLAMA_HOST can be "host:port" or just "host"
+        const char* hostEnv = std::getenv("OLLAMA_HOST");
+        if (hostEnv && hostEnv[0] != '\0') {
+            std::string hostStr = hostEnv;
+            // Strip http:// or https:// prefix if present
+            if (hostStr.substr(0, 7) == "http://")
+                hostStr = hostStr.substr(7);
+            else if (hostStr.substr(0, 8) == "https://")
+                hostStr = hostStr.substr(8);
+            // Check for host:port format
+            auto colonPos = hostStr.rfind(':');
+            if (colonPos != std::string::npos && colonPos > 0) {
+                config.Host = hostStr.substr(0, colonPos);
+                try { config.Port = std::stoi(hostStr.substr(colonPos + 1)); }
+                catch (...) { /* keep default port */ }
+            } else {
+                config.Host = hostStr;
+            }
+        }
+    }
 
-    OllamaClient::OllamaClient(const OllamaConfig& config) : m_Config(config) {}
+    OllamaClient::OllamaClient() {
+        ApplyEnvironmentOverrides(m_Config);
+    }
+
+    OllamaClient::OllamaClient(const OllamaConfig& config) : m_Config(config) {
+        ApplyEnvironmentOverrides(m_Config);
+    }
 
     std::string OllamaClient::GetBaseURL() const {
         return "http://" + m_Config.Host + ":" + std::to_string(m_Config.Port);

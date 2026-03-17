@@ -71,10 +71,10 @@ namespace GameEngine {
     }
 
     void JointComponent::OnCreate() {
-        if (!Owner) return;
+        if (!GetOwnerEntity()) return;
         
         // Get scene from owner entity
-        m_Scene = Owner->GetScene();
+        m_Scene = GetOwnerEntity().GetScene();
         
         RebuildJoint();
         
@@ -94,7 +94,7 @@ namespace GameEngine {
     }
 
     void JointComponent::RebuildJoint() {
-        if (!m_Scene || !Owner) return;
+        if (!m_Scene || !GetOwnerEntity()) return;
         
         // Remove existing constraint
         if (m_Constraint) {
@@ -106,7 +106,7 @@ namespace GameEngine {
         }
         
         // Check this entity has RigidBodyComponent
-        if (!Owner->HasComponent<RigidBodyComponent>()) {
+        if (!GetOwnerEntity().HasComponent<RigidBodyComponent>()) {
             GE_CORE_WARN("JointComponent: Entity has no RigidBodyComponent");
             return;
         }
@@ -118,7 +118,7 @@ namespace GameEngine {
             return;
         }
         
-        auto& rbA = Owner->GetComponent<RigidBodyComponent>();
+        auto& rbA = GetOwnerEntity().GetComponent<RigidBodyComponent>();
         auto& rbB = connectedEntity.GetComponent<RigidBodyComponent>();
         
         Physics::RigidBody* bodyA = rbA.GetRigidBody().get();

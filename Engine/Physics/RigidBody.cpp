@@ -17,7 +17,7 @@ namespace Physics {
         , m_AngularDamping(0.95f)
         , m_UseGravity(true)
         , m_IsAwake(true)
-        , m_Motion(0.0f) {
+        , m_Motion(1.0f) {
         
         SetMass(mass);
         
@@ -138,20 +138,23 @@ namespace Physics {
     
     void RigidBody::IntegrateVelocities(float deltaTime) {
         if (!m_IsAwake || m_BodyType == BodyType::Static) return;
-        
+
+        // Update position from velocity (before damping, so full velocity is used)
+        m_Position += m_LinearVelocity * deltaTime;
+
+        // Update rotation from angular velocity (exact formula using angleAxis)
+        float angularSpeed = glm::length(m_AngularVelocity);
+        if (angularSpeed > 0.0001f) {
+            glm::vec3 axis = m_AngularVelocity / angularSpeed;
+            float angle = angularSpeed * deltaTime;
+            m_Rotation = glm::normalize(glm::angleAxis(angle, axis) * m_Rotation);
+        }
+
         if (m_BodyType == BodyType::Dynamic || m_BodyType == BodyType::Kinematic) {
-            // Apply damping
+            // Apply damping after position update
             m_LinearVelocity *= std::pow(m_LinearDamping, deltaTime);
             m_AngularVelocity *= std::pow(m_AngularDamping, deltaTime);
         }
-        
-        // Update position from velocity
-        m_Position += m_LinearVelocity * deltaTime;
-        
-        // Update rotation from angular velocity
-        glm::quat angularQuat(0.0f, m_AngularVelocity.x, m_AngularVelocity.y, m_AngularVelocity.z);
-        m_Rotation += 0.5f * angularQuat * m_Rotation * deltaTime;
-        m_Rotation = glm::normalize(m_Rotation);
         
         // Update motion for sleep calculation
         float currentMotion = glm::dot(m_LinearVelocity, m_LinearVelocity) + 

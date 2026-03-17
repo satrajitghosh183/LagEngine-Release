@@ -105,8 +105,8 @@ namespace GameEngine {
 
     void ColliderComponent::OnCreate() {
         // If there's a rigid body component, attach our collision shape to it
-        if (m_Shape && Owner && Owner->HasComponent<RigidBodyComponent>()) {
-            auto& rb = Owner->GetComponent<RigidBodyComponent>();
+        if (m_Shape && GetOwnerEntity() && GetOwnerEntity().HasComponent<RigidBodyComponent>()) {
+            auto& rb = GetOwnerEntity().GetComponent<RigidBodyComponent>();
             auto rigidBody = rb.GetRigidBody();
             if (rigidBody) {
                 rigidBody->SetCollisionShape(m_Shape);
@@ -122,8 +122,8 @@ namespace GameEngine {
 
     void ColliderComponent::OnDestroy() {
         // Remove collision shape from rigid body
-        if (Owner && Owner->HasComponent<RigidBodyComponent>()) {
-            auto& rb = Owner->GetComponent<RigidBodyComponent>();
+        if (GetOwnerEntity() && GetOwnerEntity().HasComponent<RigidBodyComponent>()) {
+            auto& rb = GetOwnerEntity().GetComponent<RigidBodyComponent>();
             auto rigidBody = rb.GetRigidBody();
             if (rigidBody) {
                 rigidBody->SetCollisionShape(nullptr);
@@ -135,8 +135,8 @@ namespace GameEngine {
         m_Shape = shape;
         
         // Update rigid body inertia if present
-        if (Owner && Owner->HasComponent<RigidBodyComponent>()) {
-            auto& rb = Owner->GetComponent<RigidBodyComponent>();
+        if (GetOwnerEntity() && GetOwnerEntity().HasComponent<RigidBodyComponent>()) {
+            auto& rb = GetOwnerEntity().GetComponent<RigidBodyComponent>();
             if (shape && rb.Type == RigidBodyComponent::BodyType::Dynamic) {
                 glm::mat3 inertia = shape->CalculateInertiaTensor(rb.Mass);
                 rb.GetRigidBody()->SetInertiaTensor(inertia);

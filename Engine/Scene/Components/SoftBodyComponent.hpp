@@ -24,6 +24,12 @@ namespace GameEngine {
         void UpdateMesh();
         Physics::XPBDSolver* GetSolver() { return m_Solver.get(); }
 
+        /**
+         * @brief Set/Get the shared mesh driven by the solver
+         */
+        void SetMesh(const Ref<Mesh3D>& mesh) { m_Mesh = mesh; }
+        Ref<Mesh3D> GetMesh() const { return m_Mesh; }
+
         // Public properties
         float Mass = 1.0f;
         float Damping = 0.99f;

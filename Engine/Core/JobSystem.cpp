@@ -39,16 +39,20 @@ namespace GameEngine {
     }
 
     void JobSystem::MarkJobComplete(uint64_t jobId) {
-        std::lock_guard<std::mutex> lock(s_CompletionMutex);
-        s_CompletedJobs.insert(jobId);
-        s_CompletedJobOrder.push_back(jobId);
-        // Prune old entries to prevent unbounded growth (keep last 8192)
-        const size_t maxCompleted = 8192;
-        while (s_CompletedJobOrder.size() > maxCompleted) {
-            uint64_t oldId = s_CompletedJobOrder.front();
-            s_CompletedJobOrder.pop_front();
-            s_CompletedJobs.erase(oldId);
+        {
+            std::lock_guard<std::mutex> lock(s_CompletionMutex);
+            s_CompletedJobs.insert(jobId);
+            s_CompletedJobOrder.push_back(jobId);
+            // Prune old entries to prevent unbounded growth (keep last 8192)
+            const size_t maxCompleted = 8192;
+            while (s_CompletedJobOrder.size() > maxCompleted) {
+                uint64_t oldId = s_CompletedJobOrder.front();
+                s_CompletedJobOrder.pop_front();
+                s_CompletedJobs.erase(oldId);
+            }
         }
+        // Wake all threads waiting on a specific job completion
+        s_CompletionCV.notify_all();
     }
 
     // JobQueue implementation

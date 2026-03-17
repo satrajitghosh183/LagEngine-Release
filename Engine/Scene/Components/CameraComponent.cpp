@@ -46,32 +46,24 @@ namespace GameEngine {
     void CameraComponent::OnCreate() {
         m_Camera = CreateRef<Camera3D>(FOV, AspectRatio, NearClip, FarClip);
         
-        // Sync with transform
-        if (Owner && Owner->HasComponent<TransformComponent>()) {
-            auto& transform = Owner->GetComponent<TransformComponent>();
-            m_Camera->SetPosition(transform.GetWorldPosition());
-            
-            // Set rotation from transform
-            glm::vec3 euler = transform.GetEulerAngles();
-            m_Camera->SetRotation(euler.x, euler.y, euler.z);
+        // Sync with transform using world matrix for proper rotation handling
+        if (GetOwnerEntity() && GetOwnerEntity().HasComponent<TransformComponent>()) {
+            auto& transform = GetOwnerEntity().GetComponent<TransformComponent>();
+            m_Camera->SetFromWorldTransform(transform.GetWorldTransform());
         }
     }
 
     void CameraComponent::OnUpdate(float deltaTime) {
-        if (!m_Camera || !Owner) return;
+        if (!m_Camera || !GetOwnerEntity()) return;
         
         // Update camera properties
         m_Camera->SetFOV(FOV);
         m_Camera->SetAspectRatio(AspectRatio);
         
-        // Sync with transform
-        if (Owner->HasComponent<TransformComponent>()) {
-            auto& transform = Owner->GetComponent<TransformComponent>();
-            m_Camera->SetPosition(transform.GetWorldPosition());
-            
-            // Set rotation from transform
-            glm::vec3 euler = transform.GetEulerAngles();
-            m_Camera->SetRotation(euler.x, euler.y, euler.z);
+        // Sync with transform using world matrix for proper rotation handling
+        if (GetOwnerEntity().HasComponent<TransformComponent>()) {
+            auto& transform = GetOwnerEntity().GetComponent<TransformComponent>();
+            m_Camera->SetFromWorldTransform(transform.GetWorldTransform());
         }
     }
 }

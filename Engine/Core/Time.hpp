@@ -36,9 +36,11 @@ namespace GameEngine {
         static float GetUnscaledDeltaTime() { return s_DeltaTime; }
         
         /**
-         * @brief Get time since engine start in seconds
+         * @brief Get time since engine start in seconds (wall clock)
          */
-        static float GetTime() { return s_Time; }
+        static float GetTime() {
+            return std::chrono::duration<float>(Clock::now() - s_StartTime).count();
+        }
         
         /**
          * @brief Get current frame count

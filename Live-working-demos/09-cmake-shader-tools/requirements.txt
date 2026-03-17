@@ -1,0 +1,27 @@
+# GLSL Shader Generator - Dependencies
+# =====================================
+# Install with: pip install -r requirements.txt
+
+# Core dependencies (required)
+requests>=2.28.0
+
+# OpenGL validation (recommended - pick one option)
+# -------------------------------------------------
+
+# Option 1: ModernGL (recommended - cleaner API)
+moderngl>=5.8.0
+
+# Option 2: PyOpenGL + GLFW (alternative)
+# PyOpenGL>=3.1.6
+# glfw>=2.5.0
+
+# Preview window (optional - for visual preview)
+# ----------------------------------------------
+pygame>=2.5.0
+numpy>=1.24.0
+
+# Development dependencies (optional)
+# -----------------------------------
+# pytest>=7.0.0
+# black>=23.0.0
+# mypy>=1.0.0

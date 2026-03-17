@@ -2,6 +2,7 @@
 #include "../../Core/Logger.hpp"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <cmath>
 
 namespace GameEngine {
 namespace Physics {
@@ -192,7 +193,7 @@ namespace Physics {
         float distSq = glm::dot(delta, delta);
         float radiusSum = a->GetRadius() + b->GetRadius();
         
-        if (distSq >= radiusSum * radiusSum) {
+        if (distSq > radiusSum * radiusSum) {
             return false;
         }
         
@@ -343,11 +344,11 @@ namespace Physics {
             glm::vec3 axis = axesA[i];
             
             float rA = halfA[i];
-            float rB = abs(glm::dot(axesB[0], axis)) * halfB.x +
-                      abs(glm::dot(axesB[1], axis)) * halfB.y +
-                      abs(glm::dot(axesB[2], axis)) * halfB.z;
-            
-            float separation = abs(glm::dot(delta, axis)) - (rA + rB);
+            float rB = std::abs(glm::dot(axesB[0], axis)) * halfB.x +
+                      std::abs(glm::dot(axesB[1], axis)) * halfB.y +
+                      std::abs(glm::dot(axesB[2], axis)) * halfB.z;
+
+            float separation = std::abs(glm::dot(delta, axis)) - (rA + rB);
             
             if (separation > 0) {
                 return false;  // Separating axis found
@@ -366,12 +367,12 @@ namespace Physics {
         for (int i = 0; i < 3; i++) {
             glm::vec3 axis = axesB[i];
             
-            float rA = abs(glm::dot(axesA[0], axis)) * halfA.x +
-                      abs(glm::dot(axesA[1], axis)) * halfA.y +
-                      abs(glm::dot(axesA[2], axis)) * halfA.z;
+            float rA = std::abs(glm::dot(axesA[0], axis)) * halfA.x +
+                      std::abs(glm::dot(axesA[1], axis)) * halfA.y +
+                      std::abs(glm::dot(axesA[2], axis)) * halfA.z;
             float rB = halfB[i];
-            
-            float separation = abs(glm::dot(delta, axis)) - (rA + rB);
+
+            float separation = std::abs(glm::dot(delta, axis)) - (rA + rB);
             
             if (separation > 0) {
                 return false;
@@ -394,12 +395,12 @@ namespace Physics {
                 if (lenSq < 1e-8f) continue;  // Parallel edges, skip
                 axis /= std::sqrt(lenSq);
                 
-                float rA = abs(glm::dot(axesA[(i+1)%3], axis)) * halfA[(i+1)%3] +
-                           abs(glm::dot(axesA[(i+2)%3], axis)) * halfA[(i+2)%3];
-                float rB = abs(glm::dot(axesB[(j+1)%3], axis)) * halfB[(j+1)%3] +
-                           abs(glm::dot(axesB[(j+2)%3], axis)) * halfB[(j+2)%3];
-                
-                float separation = abs(glm::dot(delta, axis)) - (rA + rB);
+                float rA = std::abs(glm::dot(axesA[(i+1)%3], axis)) * halfA[(i+1)%3] +
+                           std::abs(glm::dot(axesA[(i+2)%3], axis)) * halfA[(i+2)%3];
+                float rB = std::abs(glm::dot(axesB[(j+1)%3], axis)) * halfB[(j+1)%3] +
+                           std::abs(glm::dot(axesB[(j+2)%3], axis)) * halfB[(j+2)%3];
+
+                float separation = std::abs(glm::dot(delta, axis)) - (rA + rB);
                 
                 if (separation > 0) {
                     return false;  // Separating axis found

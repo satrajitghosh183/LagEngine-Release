@@ -1,0 +1,8 @@
+torch>=2.0.0
+gymnasium>=0.29.0
+numpy>=1.24.0
+tensorboard>=2.14.0
+tqdm>=4.65.0
+pytest>=7.0.0
+# setuptools<82 required for tensorboard (pkg_resources was removed in 82+)
+setuptools>=58,<82

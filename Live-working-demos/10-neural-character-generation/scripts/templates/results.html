@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+
+{% block title %}Avatar Creation Pipeline - Results{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="card-title mb-0">Processing Results</h2>
+            <span class="badge bg-success fs-5">Complete</span>
+        </div>
+        <p class="lead mb-4">The processing for subject <strong>{{ subject_id }}</strong> has been completed successfully. Below are the results of each processing stage.</p>
+        
+        <div class="alert alert-info">
+            <h4 class="alert-heading">Next Steps</h4>
+            <p>Your avatar data has been processed and is ready to use. You can now:</p>
+            <ul class="mb-0">
+                <li>Download the processed data for use in your 3D modeling software</li>
+                <li>View the extracted features and landmarks</li>
+                <li>Continue to NeRF training to generate a 3D model</li>
+            </ul>
+        </div>
+
+        <!-- Processing Summary -->
+        <div class="card bg-light mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Processing Summary</h5>
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="border rounded p-3 bg-white">
+                            <h3 class="mb-0 text-primary">{{ total_images }}</h3>
+                            <small class="text-muted">Total Images</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="border rounded p-3 bg-white">
+                            <h3 class="mb-0 text-primary">{{ poses_detected }}</h3>
+                            <small class="text-muted">Poses Detected</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="border rounded p-3 bg-white">
+                            <h3 class="mb-0 text-success">{{ landmarks_extracted }}</h3>
+                            <small class="text-muted">Landmarks Extracted</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="border rounded p-3 bg-white">
+                            <h3 class="mb-0 text-info">{{ actions_recorded }}</h3>
+                            <small class="text-muted">Actions Recorded</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Continue to Training -->
+        <div class="text-center">
+            <a href="/training/{{ subject_id }}" class="btn btn-success btn-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-play-circle me-2" viewBox="0 0 16 16" style="vertical-align: text-bottom;">
+                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                    <path d="M6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445z"/>
+                </svg>
+                Continue to Training
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Poses Section -->
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h3 class="mb-0">Captured Poses</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% for pose, images in pose_images.items() %}
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            {{ pose|upper }} View
+                        </div>
+                        <div class="card-body">
+                            {% if images %}
+                                <div id="carousel-{{ pose }}" class="carousel slide" data-bs-ride="carousel">
+                                    <div class="carousel-inner">
+                                        {% for image in images %}
+                                            <div class="carousel-item {% if loop.first %}active{% endif %}">
+                                                <img src="/data/preprocessed/{{ subject_id }}/poses/{{ pose }}/{{ image }}" class="d-block w-100" alt="{{ pose }} pose">
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% if images|length > 1 %}
+                                        <button class="carousel-control-prev" type="button" data-bs-target="#carousel-{{ pose }}" data-bs-slide="prev">
+                                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                                            <span class="visually-hidden">Previous</span>
+                                        </button>
+                                        <button class="carousel-control-next" type="button" data-bs-target="#carousel-{{ pose }}" data-bs-slide="next">
+                                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                                            <span class="visually-hidden">Next</span>
+                                        </button>
+                                    {% endif %}
+                                </div>
+                                <div class="text-center mt-2">
+                                    <small class="text-muted">{{ images|length }} image(s) processed</small>
+                                </div>
+                            {% else %}
+                                <div class="text-center text-muted">
+                                    <p>No images for this pose</p>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Actions Section -->
+{% if action_frames %}
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h3 class="mb-0">Captured Actions</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% for action, frame_count in action_frames.items() %}
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            {{ action|upper }} Action
+                        </div>
+                        <div class="card-body">
+                            {% if frame_count > 0 %}
+                                <div class="text-center">
+                                    <img src="/data/preprocessed/{{ subject_id }}/actions/{{ action }}/0000.png" class="img-fluid mb-2" alt="{{ action }} action first frame">
+                                    <div class="badge bg-info">{{ frame_count }} frames captured</div>
+                                </div>
+                                <div class="d-flex justify-content-center mt-3">
+                                    <a href="#" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modal-{{ action }}">
+                                        Preview Animation
+                                    </a>
+                                </div>
+                                
+                                <!-- Modal for action preview -->
+                                <div class="modal fade" id="modal-{{ action }}" tabindex="-1" aria-hidden="true">
+                                    <div class="modal-dialog modal-lg">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title">{{ action|upper }} Action Preview</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                            </div>
+                                            <div class="modal-body text-center">
+                                                <div id="animation-{{ action }}" class="animation-container">
+                                                    <!-- Animation will be loaded here -->
+                                                    <img src="/data/preprocessed/{{ subject_id }}/actions/{{ action }}/0000.png" class="img-fluid" alt="{{ action }} animation" id="frame-{{ action }}">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <div class="text-center text-muted">
+                                    <p>No frames for this action</p>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Landmarks and Embeddings Section -->
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h3 class="mb-0">Extracted Features</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        Facial Landmarks
+                    </div>
+                    <div class="card-body">
+                        {% if has_landmarks %}
+                            <div class="text-center mb-3">
+                                <img src="/static/images/landmark_example.png" class="img-fluid" alt="Facial landmarks example" style="max-height: 200px;">
+                            </div>
+                            <p>
+                                <span class="badge bg-success">Extracted</span>
+                                MediaPipe face and body landmarks were successfully extracted for all images.
+                            </p>
+                            <div class="text-muted small">
+                                Landmarks include 468 facial points and 33 body keypoints.
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted">
+                                <p>
+                                    <span class="badge bg-warning">Not Available</span>
+                                    Landmark extraction was not performed or did not complete successfully.
+                                </p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        Visual Embeddings
+                    </div>
+                    <div class="card-body">
+                        {% if has_embeddings %}
+                            <div class="text-center mb-3">
+                                <img src="/static/images/embedding_example.png" class="img-fluid" alt="Visual embeddings example" style="max-height: 200px;">
+                            </div>
+                            <p>
+                                <span class="badge bg-success">Extracted</span>
+                                DINOv2 visual feature embeddings were successfully extracted.
+                            </p>
+                            <div class="text-muted small">
+                                These embeddings can be used for neural rendering and avatar animation.
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted">
+                                <p>
+                                    <span class="badge bg-warning">Not Available</span>
+                                    Visual embedding extraction was not performed or did not complete successfully.
+                                </p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- LLFF Data Section -->
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h3 class="mb-0">Camera Pose Estimation (LLFF Format)</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        Pose Estimation
+                    </div>
+                    <div class="card-body">
+                        {% if has_llff_data %}
+                            <div class="text-center mb-3">
+                                <img src="/static/images/pose_example.png" class="img-fluid" alt="Pose estimation example" style="max-height: 200px;">
+                            </div>
+                            <p>
+                                <span class="badge bg-success">Generated</span>
+                                Camera pose data has been successfully estimated using facial landmarks.
+                            </p>
+                            <div class="text-muted small">
+                                LLFF format data includes camera poses, viewing directions, and scene boundaries
+                                suitable for neural rendering.
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted">
+                                <p>
+                                    <span class="badge bg-warning">Not Available</span>
+                                    LLFF pose estimation was not performed or did not complete successfully.
+                                </p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        Dataset Splits
+                    </div>
+                    <div class="card-body">
+                        {% if has_llff_data %}
+                            <div class="text-center mb-3">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body p-2 text-center">
+                                                <h3 class="mb-0">{{ train_count }}</h3>
+                                                <small class="text-muted">Training Images</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body p-2 text-center">
+                                                <h3 class="mb-0">{{ val_count }}</h3>
+                                                <small class="text-muted">Validation Images</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <p>
+                                <span class="badge bg-success">Generated</span>
+                                Training and validation splits have been created for neural rendering.
+                            </p>
+                            <div class="text-muted small">
+                                These splits enable proper training and evaluation of neural rendering models.
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted">
+                                <p>
+                                    <span class="badge bg-warning">Not Available</span>
+                                    Dataset splits were not generated.
+                                </p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Download Section -->
+<div class="card">
+    <div class="card-header bg-success text-white">
+        <h3 class="mb-0">Download Data</h3>
+    </div>
+    <div class="card-body">
+        <p>All processed data has been saved on the server. You can download the complete dataset using the button below.</p>
+        
+        <div class="row mt-4">
+            <div class="col-md-6 offset-md-3">
+                <div class="list-group">
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">Complete Dataset</h5>
+                            <small class="text-muted">Download All</small>
+                        </div>
+                        <p class="mb-1">Includes segmented images, landmarks, embeddings, and LLFF data.</p>
+                    </a>
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">Segmented Images</h5>
+                            <small class="text-muted">PNG Files</small>
+                        </div>
+                        <p class="mb-1">All pose and action images with background removed.</p>
+                    </a>
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">Landmarks & LLFF Data</h5>
+                            <small class="text-muted">JSON & NPY Files</small>
+                        </div>
+                        <p class="mb-1">Facial landmarks and camera pose estimation data.</p>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center mt-4">
+            <a href="/" class="btn btn-primary btn-lg">Process a New Avatar</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Initialize animation playback for action previews
+    document.addEventListener('DOMContentLoaded', function() {
+        {% for action, frame_count in action_frames.items() %}
+            {% if frame_count > 0 %}
+                // Set up animation for {{ action }}
+                (function() {
+                    let frameIndex = 0;
+                    const frameCount = {{ frame_count }};
+                    const frameElement = document.getElementById('frame-{{ action }}');
+                    let intervalId = null;
+                    
+                    // Start animation when modal is shown
+                    document.getElementById('modal-{{ action }}').addEventListener('shown.bs.modal', function() {
+                        frameIndex = 0;
+                        intervalId = setInterval(function() {
+                            frameIndex = (frameIndex + 1) % frameCount;
+                            const paddedIndex = frameIndex.toString().padStart(4, '0');
+                            frameElement.src = `/data/preprocessed/{{ subject_id }}/actions/{{ action }}/${paddedIndex}.png`;
+                        }, 100); // 10 fps
+                    });
+                    
+                    // Stop animation when modal is hidden
+                    document.getElementById('modal-{{ action }}').addEventListener('hidden.bs.modal', function() {
+                        clearInterval(intervalId);
+                    });
+                })();
+            {% endif %}
+        {% endfor %}
+    });
+</script>
+{% endblock %}

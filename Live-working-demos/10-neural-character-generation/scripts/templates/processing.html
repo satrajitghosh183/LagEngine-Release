@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Avatar Creation Pipeline - Processing{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body text-center">
+        <h2 class="card-title mb-4">Processing Your Avatar</h2>
+        <p class="lead">Your images are being processed. Please wait while we create your avatar.</p>
+        
+        <div class="text-center my-5">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+        
+        <div class="processing-steps">
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-light">
+                        <div class="card-body text-center p-4">
+                            <div class="rounded-circle bg-primary text-white mx-auto mb-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                <h3 class="mb-0">1</h3>
+                            </div>
+                            <h5>Segmentation</h5>
+                            <p class="text-muted small">Removing backgrounds</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-light">
+                        <div class="card-body text-center p-4">
+                            <div class="rounded-circle bg-primary text-white mx-auto mb-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                <h3 class="mb-0">2</h3>
+                            </div>
+                            <h5>Landmarks</h5>
+                            <p class="text-muted small">Extracting facial features</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-light">
+                        <div class="card-body text-center p-4">
+                            <div class="rounded-circle bg-primary text-white mx-auto mb-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                <h3 class="mb-0">3</h3>
+                            </div>
+                            <h5>Embeddings</h5>
+                            <p class="text-muted small">Generating visual features</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-light">
+                        <div class="card-body text-center p-4">
+                            <div class="rounded-circle bg-primary text-white mx-auto mb-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                <h3 class="mb-0">4</h3>
+                            </div>
+                            <h5>Finalization</h5>
+                            <p class="text-muted small">Preparing avatar data</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <p class="text-muted mt-4">This may take a few minutes. You'll be redirected automatically when processing is complete.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check if processing is complete every 5 seconds
+        const checkInterval = setInterval(function() {
+            fetch('/results/{{ subject_id }}')
+                .then(response => {
+                    if (response.ok) {
+                        clearInterval(checkInterval);
+                        window.location.href = '/results/{{ subject_id }}';
+                    }
+                })
+                .catch(error => console.error('Error checking results:', error));
+        }, 5000);
+    });
+</script>
+{% endblock %}

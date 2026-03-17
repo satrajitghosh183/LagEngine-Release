@@ -24,6 +24,13 @@
 #include "Panels/NewProjectDialog.hpp"
 #include "Panels/PresetBrowserPanel.hpp"
 #include "Panels/WelcomePanel.hpp"
+#include "Panels/AnimationPanel.hpp"
+#include "Panels/BuildPanel.hpp"
+#include "Panels/CodeEditorPanel.hpp"
+#include "Panels/AIAssistantPanel.hpp"
+#include "Panels/MaterialEditorPanel.hpp"
+#include "Panels/ObjectSpawnerPanel.hpp"
+#include "Panels/ProjectSettingsPanel.hpp"
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <vector>
@@ -94,8 +101,11 @@ namespace GameEngine {
 
         // Scene tab management
         void RenderSceneTabs();
+        bool HasValidCurrentScene() const { return m_CurrentSceneIndex >= 0 && m_CurrentSceneIndex < static_cast<int>(m_Scenes.size()); }
         EditorScene& GetCurrentEditorScene();
         const EditorScene& GetCurrentEditorScene() const;
+        EditorScene* TryGetCurrentEditorScene();
+        const EditorScene* TryGetCurrentEditorScene() const;
         Ref<Scene> GetCurrentScene();
         Ref<Scene> GetCurrentScene() const;
         EditorScene* FindEditorSceneByID(uint64_t id);
@@ -108,6 +118,19 @@ namespace GameEngine {
         void PopulateDefaultScene();
         Entity CreateDefaultMeshEntity(const std::string& name, const Ref<Mesh3D>& mesh);
         void PostLoadFixupMaterials(const Ref<Scene>& scene);
+
+        // One-click demo scenes
+        void LoadPhysicsDemo();
+        void LoadLightingDemo();
+        void LoadClothDemo();
+        void LoadSPHWaterDemo();
+        void LoadRobotArmDemo();
+        void LoadGPUParticleDemo();
+        void LoadSoftBodyDemo();
+        void LoadJointsDemo();
+        void LoadCharacterDemo();
+        void LoadCannonShootingDemo();  // 2D Cannon shooting cloth demo
+        void LoadVerletClothDemo();     // Verlet-integrated cloth + cannon
 
         // Asset drop from browser to viewport
         void OnAssetDroppedInViewport(const std::string& assetPath);
@@ -131,6 +154,15 @@ namespace GameEngine {
         Scope<NewProjectDialog> m_NewProjectDialog;
         Scope<PresetBrowserPanel> m_PresetBrowserPanel;
         Scope<WelcomePanel> m_WelcomePanel;
+        Scope<AnimationPanel> m_AnimationPanel;
+        
+        // New integrated panels
+        Scope<BuildPanel> m_BuildPanel;
+        Scope<CodeEditorPanel> m_CodeEditorPanel;
+        Scope<AIAssistantPanel> m_AIAssistantPanel;
+        Scope<MaterialEditorPanel> m_MaterialEditorPanel;
+        Scope<ObjectSpawnerPanel> m_ObjectSpawnerPanel;
+        Scope<ProjectSettingsPanel> m_ProjectSettingsPanel;
 
         // Multiple scene tabs
         std::vector<std::unique_ptr<EditorScene>> m_Scenes;

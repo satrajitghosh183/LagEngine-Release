@@ -2,7 +2,7 @@
 
 namespace GameEngine {
 
-    Time::TimePoint Time::s_StartTime;
+    Time::TimePoint Time::s_StartTime = Time::Clock::now();
     Time::TimePoint Time::s_LastFrameTime;
     float Time::s_DeltaTime = 0.0f;
     float Time::s_Time = 0.0f;

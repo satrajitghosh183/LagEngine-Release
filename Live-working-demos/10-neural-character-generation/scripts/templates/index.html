@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Avatar Creation Pipeline - Home{% endblock %}
+
+{% block content %}
+<div class="jumbotron text-center bg-light p-5 rounded mb-4">
+    <h1 class="display-4">Avatar Creation Pipeline</h1>
+    <p class="lead">Create your personalized 3D avatar by capturing multi-view images and action videos.</p>
+    <hr class="my-4">
+    <p>This application will guide you through the process of capturing the necessary data to create a customized avatar.</p>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h3 class="card-title">Webcam Capture</h3>
+                <p class="card-text">Use your webcam to capture images in different poses and record action videos.</p>
+                <p class="card-text text-muted">Ideal if you want to create your avatar from scratch.</p>
+                <a href="/webcam-capture" class="btn btn-primary">Start Webcam Capture</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h3 class="card-title">Upload Files</h3>
+                <p class="card-text">Upload your own images and videos to create an avatar.</p>
+                <p class="card-text text-muted">Perfect if you already have photos or if you prefer to use your smartphone camera.</p>
+                <a href="/upload-files" class="btn btn-primary">Upload Files</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h3 class="card-title">How It Works</h3>
+        <div class="row mt-4">
+            <div class="col-md-3 text-center">
+                <div class="bg-light p-3 rounded-circle mb-2 mx-auto" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
+                    <span class="fs-2">1</span>
+                </div>
+                <h5>Capture Images</h5>
+                <p class="small">Capture your face from different angles: front, left, right, up, and down.</p>
+            </div>
+            <div class="col-md-3 text-center">
+                <div class="bg-light p-3 rounded-circle mb-2 mx-auto" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
+                    <span class="fs-2">2</span>
+                </div>
+                <h5>Record Actions</h5>
+                <p class="small">Record short video clips of simple actions like idle, walking, and running.</p>
+            </div>
+            <div class="col-md-3 text-center">
+                <div class="bg-light p-3 rounded-circle mb-2 mx-auto" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
+                    <span class="fs-2">3</span>
+                </div>
+                <h5>Processing</h5>
+                <p class="small">Our AI processes your data to create segmentation masks and extract facial landmarks.</p>
+            </div>
+            <div class="col-md-3 text-center">
+                <div class="bg-light p-3 rounded-circle mb-2 mx-auto" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
+                    <span class="fs-2">4</span>
+                </div>
+                <h5>Results</h5>
+                <p class="small">View and download your processed data ready for avatar creation.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h3 class="card-title">Requirements</h3>
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">A well-lit environment with neutral background</li>
+            <li class="list-group-item">Webcam or smartphone camera</li>
+            <li class="list-group-item">Enough space to perform simple actions (for action recording)</li>
+            <li class="list-group-item">Stable internet connection</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

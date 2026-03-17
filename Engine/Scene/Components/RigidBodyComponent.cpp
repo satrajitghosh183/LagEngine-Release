@@ -81,8 +81,8 @@ namespace GameEngine {
         SyncFromTransform();
         
         // Check if there's a collider component and get its shape
-        if (Owner && Owner->HasComponent<ColliderComponent>()) {
-            auto& collider = Owner->GetComponent<ColliderComponent>();
+        if (GetOwnerEntity() && GetOwnerEntity().HasComponent<ColliderComponent>()) {
+            auto& collider = GetOwnerEntity().GetComponent<ColliderComponent>();
             if (collider.GetShape()) {
                 m_RigidBody->SetCollisionShape(collider.GetShape());
                 GE_CORE_DEBUG("RigidBodyComponent: Attached collision shape from ColliderComponent");
@@ -90,8 +90,8 @@ namespace GameEngine {
         }
         
         // Register with physics world
-        if (Owner) {
-            Scene* scene = Owner->GetScene();
+        if (GetOwnerEntity()) {
+            Scene* scene = GetOwnerEntity().GetScene();
             if (scene) {
                 auto physicsWorld = scene->GetPhysicsWorld();
                 if (physicsWorld) {
@@ -117,8 +117,8 @@ namespace GameEngine {
 
     void RigidBodyComponent::OnDestroy() {
         // Unregister from physics world
-        if (m_RigidBody && Owner) {
-            Scene* scene = Owner->GetScene();
+        if (m_RigidBody && GetOwnerEntity()) {
+            Scene* scene = GetOwnerEntity().GetScene();
             if (scene) {
                 auto physicsWorld = scene->GetPhysicsWorld();
                 if (physicsWorld) {
@@ -131,20 +131,20 @@ namespace GameEngine {
     }
 
     void RigidBodyComponent::SyncFromTransform() {
-        if (!Owner || !m_RigidBody) return;
+        if (!GetOwnerEntity() || !m_RigidBody) return;
         
-        if (Owner->HasComponent<TransformComponent>()) {
-            auto& transform = Owner->GetComponent<TransformComponent>();
+        if (GetOwnerEntity().HasComponent<TransformComponent>()) {
+            auto& transform = GetOwnerEntity().GetComponent<TransformComponent>();
             m_RigidBody->SetPosition(transform.GetWorldPosition());
             m_RigidBody->SetRotation(transform.GetWorldRotation());
         }
     }
 
     void RigidBodyComponent::SyncToTransform() {
-        if (!Owner || !m_RigidBody) return;
+        if (!GetOwnerEntity() || !m_RigidBody) return;
         
-        if (Owner->HasComponent<TransformComponent>()) {
-            auto& transform = Owner->GetComponent<TransformComponent>();
+        if (GetOwnerEntity().HasComponent<TransformComponent>()) {
+            auto& transform = GetOwnerEntity().GetComponent<TransformComponent>();
             transform.SetWorldPosition(m_RigidBody->GetPosition());
             transform.Rotation = m_RigidBody->GetRotation();
             transform.SetDirty();  // Mark transform cache as dirty so rendering sees the change

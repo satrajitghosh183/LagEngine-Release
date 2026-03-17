@@ -1,0 +1,59 @@
+# Build directories
+build/
+bin/
+lib/
+out/
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+CMakeLists.txt.user
+compile_commands.json
+_deps/
+
+# Compiled objects and binaries
+*.obj
+*.o
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.exp
+*.pdb
+*.out
+
+# IDE
+.vscode/
+.idea/
+*.sln
+*.vcxproj*
+*.xcodeproj
+*.xcworkspace
+.qodo/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+*.egg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ImGui state
+imgui.ini
+
+# Logs and temp
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Shader cache
+*.spv

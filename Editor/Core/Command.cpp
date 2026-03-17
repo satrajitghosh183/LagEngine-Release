@@ -12,7 +12,7 @@ namespace GameEngine {
     }
 
     void CreateEntityCommand::Undo() {
-        if (!m_Scene || m_EntityUUID == 0) return;
+        if (!m_Scene || m_EntityUUID == UUID(0)) return;
         Entity e = m_Scene->GetEntityByUUID(m_EntityUUID);
         if (e.IsValid()) m_Scene->DestroyEntity(e);
     }
@@ -21,7 +21,7 @@ namespace GameEngine {
         : m_Scene(scene), m_EntityUUID(entityUUID) {}
 
     void DeleteEntityCommand::Execute() {
-        if (!m_Scene || m_EntityUUID == 0) return;
+        if (!m_Scene || m_EntityUUID == UUID(0)) return;
         Entity e = m_Scene->GetEntityByUUID(m_EntityUUID);
         if (e.IsValid()) {
             m_SavedName = e.GetName();
@@ -48,7 +48,7 @@ namespace GameEngine {
     void ReparentEntityCommand::Undo() {
         if (!m_Scene) return;
         Entity child = m_Scene->GetEntityByUUID(m_EntityUUID);
-        Entity oldParent = m_OldParentUUID != 0 ? m_Scene->GetEntityByUUID(m_OldParentUUID) : Entity();
+        Entity oldParent = m_OldParentUUID != UUID(0) ? m_Scene->GetEntityByUUID(m_OldParentUUID) : Entity();
         if (child.IsValid()) child.SetParent(oldParent);
     }
 

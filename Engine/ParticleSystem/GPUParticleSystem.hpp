@@ -3,6 +3,7 @@
 #include "../Core/Base.hpp"
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <vector>
 
 namespace GameEngine {
 
@@ -54,15 +55,20 @@ namespace GameEngine {
     private:
         void CompileComputeShader();
         void CompileRenderShaders();
+        void UpdateCPU(float dt);  // CPU fallback for systems without compute shaders
 
         uint32_t m_MaxParticles   = 0;
         bool     m_Initialized    = false;
+        bool     m_UseComputeShaders = false;  // True if compute shaders available
 
         // GL handles
-        uint32_t m_ParticleSSBO   = 0;
+        uint32_t m_ParticleSSBO   = 0;  // Used as VBO in fallback mode
         uint32_t m_ComputeProgram = 0;
         uint32_t m_RenderProgram  = 0;
         uint32_t m_VAO            = 0;
+
+        // CPU particle data (for fallback mode)
+        std::vector<Particle> m_ParticlesCPU;
 
         // Emit accumulator (sub-frame emission smoothing)
         float m_EmitAccumulator   = 0.0f;

@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}Avatar Creation Pipeline - Upload Files{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Upload Your Images</h2>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h3 class="card-title">Instructions</h3>
+        <p>Upload images of yourself to create your avatar. For best results:</p>
+        <ul>
+            <li>Use well-lit photos with a neutral background</li>
+            <li>Ensure your face is clearly visible in most images</li>
+            <li><strong>Variety is important!</strong> Include different angles and expressions for better results</li>
+            <li>The more images you provide, the better your avatar will be</li>
+        </ul>
+    </div>
+</div>
+
+<form id="upload-form" enctype="multipart/form-data">
+    <div class="card mb-4">
+        <div class="card-body">
+            <h3 class="card-title">Subject Information</h3>
+            <div class="mb-3">
+                <label for="subject-id" class="form-label">Subject ID (optional)</label>
+                <input type="text" class="form-control" id="subject-id" name="subject_id" placeholder="e.g., your_name">
+                <div class="form-text">If left blank, a unique ID will be generated for you.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h3 class="card-title">Upload Images</h3>
+            
+            <div class="drop-zone" id="drop-files">
+                <div class="text-center py-5">
+                    <h4 class="mt-3">Drag & drop images here</h4>
+                    <p class="text-muted">or click to select files</p>
+                    <input type="file" name="image_files" accept="image/jpeg,image/png" multiple class="d-none file-input" id="file-input">
+                </div>
+            </div>
+            
+            <div id="preview-container" class="row mt-4">
+                <!-- Image previews will be displayed here -->
+            </div>
+        </div>
+    </div>
+    
+    <div class="card-body text-center action-buttons">
+        <div class="alert alert-info mb-4">
+            <span>For optimal results, we recommend uploading at least 5 images from different angles.</span>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg" id="upload-btn">Upload & Process Files</button>
+        <button type="reset" class="btn btn-outline-secondary btn-lg ms-2">Reset</button>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // DOM elements
+    const uploadForm = document.getElementById('upload-form');
+    const dropZone = document.getElementById('drop-files');
+    const fileInput = document.getElementById('file-input');
+    const previewContainer = document.getElementById('preview-container');
+    
+    // Initialize drag & drop
+    dropZone.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // File input change handler
+    fileInput.addEventListener('change', () => {
+        updatePreview(fileInput.files);
+    });
+    
+    // Drag & drop handlers
+    dropZone.addEventListener('dragover', e => {
+        e.preventDefault();
+        dropZone.classList.add('drop-zone-active');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drop-zone-active');
+    });
+    
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('drop-zone-active');
+        
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            updatePreview(fileInput.files);
+        }
+    });
+    
+    // Update preview images
+    function updatePreview(files) {
+        previewContainer.innerHTML = '';
+        
+        if (files.length === 0) {
+            return;
+        }
+        
+        // Show file count
+        const countAlert = document.createElement('div');
+        countAlert.className = 'col-12 mb-3';
+        countAlert.innerHTML = `
+            <div class="alert alert-success">
+                <span>${files.length} image${files.length > 1 ? 's' : ''} selected</span>
+            </div>
+        `;
+        previewContainer.appendChild(countAlert);
+        
+        // Display preview for each file
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const col = document.createElement('div');
+                col.className = 'col-md-2 col-sm-3 col-4 mb-3';
+                
+                const card = document.createElement('div');
+                card.className = 'card h-100';
+                
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.className = 'card-img-top';
+                img.style.height = '120px';
+                img.style.objectFit = 'cover';
+                
+                const cardBody = document.createElement('div');
+                cardBody.className = 'card-body p-2';
+                cardBody.innerHTML = `<small class="text-muted">${file.name.substring(0, 15)}${file.name.length > 15 ? '...' : ''}</small>`;
+                
+                card.appendChild(img);
+                card.appendChild(cardBody);
+                col.appendChild(card);
+                previewContainer.appendChild(col);
+            };
+            
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    // Form submission handler
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        // Validate form - check if files are selected
+        if (!fileInput.files.length) {
+            alert('Please select at least one image file to upload.');
+            return;
+        }
+        
+        // Show loading indicator
+        const loadingElement = document.createElement('div');
+        loadingElement.className = 'text-center mt-3';
+        loadingElement.innerHTML = `
+            <div class="spinner-border text-primary mb-2" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Uploading and processing files. This may take a few minutes...</p>
+        `;
+        
+        document.querySelector('.action-buttons').appendChild(loadingElement);
+        document.getElementById('upload-btn').disabled = true;
+        
+        // Create FormData object
+        const formData = new FormData(uploadForm);
+        
+        // Add subject ID if not provided
+        if (!formData.get('subject_id')) {
+            formData.set('subject_id', `subject_${Date.now()}`);
+        }
+        
+        // Upload files and start processing
+        fetch('/api/upload-process', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Upload failed');
+            }
+            return response.json();
+        })
+        .then(data => {
+            // If successful, redirect to results page
+            window.location.href = `/results/${data.subject_id}`;
+        })
+        .catch(error => {
+            document.getElementById('upload-btn').disabled = false;
+            loadingElement.remove();
+            alert('Error: ' + error.message);
+            console.error('Upload error:', error);
+        });
+    });
+</script>
+{% endblock %}

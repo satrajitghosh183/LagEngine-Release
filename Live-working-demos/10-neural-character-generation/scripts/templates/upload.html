@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+
+{% block title %}Avatar Creation Pipeline - Upload Files{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Upload Your Own Images & Videos</h2>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h3 class="card-title">Instructions</h3>
+        <p>Upload images of yourself from different angles to create your avatar. For best results:</p>
+        <ul>
+            <li>Use well-lit photos with a neutral background</li>
+            <li>Ensure your face is clearly visible and not obscured</li>
+            <li>Provide at least one image for each required angle: front, left, right, up, and down</li>
+            <li>Multiple images for each angle will improve results</li>
+        </ul>
+    </div>
+</div>
+
+<form id="upload-form" enctype="multipart/form-data">
+    <div class="card mb-4">
+        <div class="card-body">
+            <h3 class="card-title">Subject Information</h3>
+            <div class="mb-3">
+                <label for="subject-id" class="form-label">Subject ID (optional)</label>
+                <input type="text" class="form-control" id="subject-id" name="subject_id" placeholder="e.g., your_name">
+                <div class="form-text">If left blank, a unique ID will be generated for you.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h3 class="card-title">Required Images</h3>
+            <p class="text-danger">* All poses are required for processing</p>
+            
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-primary text-white">
+                            Front View *
+                        </div>
+                        <div class="card-body">
+                            <p>Look straight at the camera</p>
+                            <div class="drop-zone" id="drop-front">
+                                <p>Drag & drop images here<br>or click to select files</p>
+                                <input type="file" name="pose_front" accept="image/jpeg,image/png" multiple class="d-none file-input" id="file-front">
+                            </div>
+                            <div id="preview-front" class="image-preview mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-primary text-white">
+                            Left View *
+                        </div>
+                        <div class="card-body">
+                            <p>Turn LEFT and look at the camera</p>
+                            <div class="drop-zone" id="drop-left">
+                                <p>Drag & drop images here<br>or click to select files</p>
+                                <input type="file" name="pose_left" accept="image/jpeg,image/png" multiple class="d-none file-input" id="file-left">
+                            </div>
+                            <div id="preview-left" class="image-preview mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-primary text-white">
+                            Right View *
+                        </div>
+                        <div class="card-body">
+                            <p>Turn RIGHT and look at the camera</p>
+                            <div class="drop-zone" id="drop-right">
+                                <p>Drag & drop images here<br>or click to select files</p>
+                                <input type="file" name="pose_right" accept="image/jpeg,image/png" multiple class="d-none file-input" id="file-right">
+                            </div>
+                            <div id="preview-right" class="image-preview mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-primary text-white">
+                            Looking Up *
+                        </div>
+                        <div class="card-body">
+                            <p>Look UP towards the ceiling</p>
+                            <div class="drop-zone" id="drop-up">
+                                <p>Drag & drop images here<br>or click to select files</p>
+                                <input type="file" name="pose_up" accept="image/jpeg,image/png" multiple class="d-none file-input" id="file-up">
+                            </div>
+                            <div id="preview-up" class="image-preview mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-primary text-white">
+                            Looking Down *
+                        </div>
+                        <div class="card-body">
+                            <p>Look DOWN towards the floor</p>
+                            <div class="drop-zone" id="drop-down">
+                                <p>Drag & drop images here<br>or click to select files</p>
+                                <input type="file" name="pose_down" accept="image/jpeg,image/png" multiple class="d-none file-input" id="file-down">
+                            </div>
+                            <div id="preview-down" class="image-preview mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card-body text-center action-buttons">
+        <button type="submit" class="btn btn-primary btn-lg" id="upload-btn">Upload & Process Files</button>
+        <button type="reset" class="btn btn-outline-secondary btn-lg ms-2">Reset</button>
+    </div>
+</form>
+
+<div class="modal fade" id="processing-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Processing Files</h5>
+            </div>
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary mb-4" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p id="processing-message">Uploading files...</p>
+                <div class="progress mt-3">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // DOM elements
+    const uploadForm = document.getElementById('upload-form');
+    const dropZones = document.querySelectorAll('.drop-zone');
+    const fileInputs = document.querySelectorAll('.file-input');
+    const processingModal = new bootstrap.Modal(document.getElementById('processing-modal'));
+    const processingMessage = document.getElementById('processing-message');
+    const progressBar = document.querySelector('.progress-bar');
+    
+    // Initialize drag & drop for all drop zones
+    dropZones.forEach(dropZone => {
+        const fileInput = dropZone.querySelector('.file-input');
+        const previewId = fileInput.id.replace('file-', 'preview-');
+        const previewContainer = document.getElementById(previewId);
+        
+        // Click to select files
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        // File input change handler
+        fileInput.addEventListener('change', () => {
+            updatePreview(fileInput.files, previewContainer);
+        });
+        
+        // Drag & drop handlers
+        dropZone.addEventListener('dragover', e => {
+            e.preventDefault();
+            dropZone.classList.add('drop-zone-active');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drop-zone-active');
+        });
+        
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('drop-zone-active');
+            
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                updatePreview(fileInput.files, previewContainer);
+            }
+        });
+    });
+    
+    // Update preview images
+    function updatePreview(files, previewContainer) {
+        previewContainer.innerHTML = '';
+        
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const imgWrapper = document.createElement('div');
+                imgWrapper.className = 'position-relative d-inline-block m-1';
+                
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.className = 'preview-image';
+                img.style.maxHeight = '100px';
+                img.style.maxWidth = '100px';
+                
+                imgWrapper.appendChild(img);
+                previewContainer.appendChild(imgWrapper);
+            };
+            
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    // Form submission handler
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        // Validate form - check if all required files are selected
+        const requiredPoses = ['front', 'left', 'right', 'up', 'down'];
+        let missingPoses = [];
+        
+        for (const pose of requiredPoses) {
+            const fileInput = document.getElementById(`file-${pose}`);
+            if (!fileInput.files.length) {
+                missingPoses.push(pose);
+            }
+        }
+        
+        if (missingPoses.length) {
+            alert(`Please provide images for the following required poses: ${missingPoses.join(', ')}`);
+            return;
+        }
+        
+        // Show processing modal
+        processingModal.show();
+        
+        // Create FormData object
+        const formData = new FormData(uploadForm);
+        
+        // Add subject ID if not provided
+        if (!formData.get('subject_id')) {
+            formData.set('subject_id', `subject_${Date.now()}`);
+        }
+        
+        // Upload files and start processing
+        fetch('/api/upload-images', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Upload failed');
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Start polling for job status
+            pollJobStatus(data.job_id, data.subject_id);
+        })
+        .catch(error => {
+            processingModal.hide();
+            alert('Error uploading files: ' + error.message);
+            console.error('Upload error:', error);
+        });
+    });
+    
+    // Poll for job status
+    function pollJobStatus(jobId, subjectId) {
+        const intervalId = setInterval(() => {
+            fetch(`/api/job-status/${jobId}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Update progress
+                    processingMessage.textContent = data.message;
+                    progressBar.style.width = `${data.progress}%`;
+                    
+                    // Check if complete
+                    if (data.status === 'completed') {
+                        clearInterval(intervalId);
+                        window.location.href = `/results/${subjectId}`;
+                    } else if (data.status === 'failed') {
+                        clearInterval(intervalId);
+                        processingModal.hide();
+                        alert('Processing failed: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error polling job status:', error);
+                });
+        }, 2000);
+    }
+</script>
+{% endblock %}

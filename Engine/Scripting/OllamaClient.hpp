@@ -1,5 +1,25 @@
 #pragma once
 
+/**
+ * @file OllamaClient.hpp
+ * @brief HTTP client for Ollama AI server
+ * 
+ * ## Setup Instructions
+ * 
+ * 1. Install Ollama: https://ollama.ai
+ *    - Windows: Download installer and run
+ *    - For D: drive storage, set OLLAMA_MODELS=D:\Ollama\models
+ * 
+ * 2. Start the Ollama server: ollama serve
+ * 
+ * 3. Pull a model: ollama pull codellama:13b
+ * 
+ * ## Environment Variables
+ * - OLLAMA_HOST: Server host (default: localhost)
+ * - OLLAMA_PORT: Server port (default: 11434)
+ * - OLLAMA_MODELS: Path to store downloaded models
+ */
+
 #include <string>
 #include <vector>
 #include <functional>
@@ -13,7 +33,7 @@ namespace GameEngine {
     };
 
     struct OllamaConfig {
-        std::string Host = "localhost";
+        std::string Host = "127.0.0.1";
         int Port = 11434;
         std::string Model = "codellama:13b";
         float Temperature = 0.7f;

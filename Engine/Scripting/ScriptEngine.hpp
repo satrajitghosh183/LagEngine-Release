@@ -59,6 +59,7 @@ namespace GameEngine {
          * @brief Get Lua state
          */
         static lua_State* GetLuaState() { return s_LuaState; }
+        static std::function<void(const std::string&)> s_PrintCallback;
 
         /**
          * @brief Set callback for Lua print() output (e.g. to show in scripting console)
@@ -76,6 +77,6 @@ namespace GameEngine {
         
         static lua_State* s_LuaState;
         static std::mutex s_LuaMutex;
-        static std::function<void(const std::string&)> s_PrintCallback;
+
     };
 }

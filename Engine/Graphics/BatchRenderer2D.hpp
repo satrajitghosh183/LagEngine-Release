@@ -28,7 +28,7 @@ namespace GameEngine {
         static Stats GetStats();
         static void ResetStats();
 
-    private:
+    public:
         struct Vertex {
             glm::vec2 Position;
             glm::vec2 TexCoord;

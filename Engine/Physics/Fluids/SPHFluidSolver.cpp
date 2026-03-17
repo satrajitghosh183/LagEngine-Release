@@ -5,22 +5,52 @@
 
 namespace GameEngine::Physics {
 
+    // -----------------------------------------------------------------------
+    // Init — default random scatter (kept for API compat)
+    // -----------------------------------------------------------------------
     void SPHFluidSolver::Init(int numParticles, const glm::vec3& domainMin, const glm::vec3& domainMax) {
         DomainMin = domainMin;
         DomainMax = domainMax;
-        m_Particles.resize(numParticles);
         m_Grid.SetCellSize(SmoothingLength);
 
-        std::default_random_engine gen(42);
+        // Prefer a regular block over random scatter (matches old sph_water.cpp)
         glm::vec3 range = domainMax - domainMin;
-        std::uniform_real_distribution<float> dx(0.0f, range.x * 0.5f);
-        std::uniform_real_distribution<float> dy(0.0f, range.y * 0.8f);
-        std::uniform_real_distribution<float> dz(0.0f, range.z * 0.5f);
+        float spacing = SmoothingLength * 0.62f;
+        int nx = std::max(1, static_cast<int>(range.x * 0.8f / spacing));
+        int ny = std::max(1, static_cast<int>(range.y * 0.7f / spacing));
+        int nz = std::max(1, static_cast<int>(range.z * 0.8f / spacing));
+        glm::vec3 origin = domainMin + glm::vec3(range.x * 0.1f, spacing, range.z * 0.1f);
+        InitBlock(nx, ny, nz, spacing, origin);
+        (void)numParticles;
+    }
 
-        for (auto& p : m_Particles) {
-            p.position = domainMin + glm::vec3(dx(gen), dy(gen), dz(gen));
+    // -----------------------------------------------------------------------
+    // InitBlock — port of old_code/src/sph_water.cpp SPH::init()
+    // Spawns a rectangular lattice of particles (proper water-column init)
+    // -----------------------------------------------------------------------
+    void SPHFluidSolver::InitBlock(int nx, int ny, int nz, float spacing, const glm::vec3& origin) {
+        m_Particles.clear();
+        m_Particles.reserve(static_cast<size_t>(nx) * ny * nz);
+        m_Grid.SetCellSize(SmoothingLength);
+
+        for (int iz = 0; iz < nz; ++iz)
+        for (int iy = 0; iy < ny; ++iy)
+        for (int ix = 0; ix < nx; ++ix) {
+            FluidParticle p;
+            p.position = origin + glm::vec3(ix * spacing, iy * spacing, iz * spacing);
             p.velocity = glm::vec3(0.0f);
+            m_Particles.push_back(p);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // AddParticle — dynamic emission (for emitter-based effects)
+    // -----------------------------------------------------------------------
+    void SPHFluidSolver::AddParticle(const glm::vec3& position, const glm::vec3& velocity) {
+        FluidParticle p;
+        p.position = position;
+        p.velocity = velocity;
+        m_Particles.push_back(p);
     }
 
     void SPHFluidSolver::Clear() { m_Particles.clear(); }

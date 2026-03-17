@@ -26,6 +26,12 @@ namespace Physics {
          * @brief Solve constraint (apply corrective impulses)
          */
         virtual void Solve() = 0;
+
+        /**
+         * @brief Solve constraint at position level (direct position projection)
+         * Default is a no-op; override in joint types that support position correction.
+         */
+        virtual void SolvePosition() {}
         
         /**
          * @brief Get constraint bodies

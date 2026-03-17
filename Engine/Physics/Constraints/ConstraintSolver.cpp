@@ -31,6 +31,12 @@ namespace Physics {
         
         // Position iterations (for stability)
         for (int i = 0; i < m_PositionIterations; i++) {
+            // Position-level correction for joint constraints
+            for (auto& constraint : constraints) {
+                if (constraint->Enabled) {
+                    constraint->SolvePosition();
+                }
+            }
             SolvePositionConstraints(contacts);
         }
     }

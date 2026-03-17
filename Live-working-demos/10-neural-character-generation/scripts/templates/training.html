@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+
+{% block title %}Training - {{ subject_id }}{% endblock %}
+
+{% block head %}
+<style>
+    .param-card {
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        background: #fff;
+    }
+    .chart-container {
+        position: relative;
+        height: 300px;
+    }
+    .status-badge {
+        font-size: 0.9rem;
+        padding: 6px 12px;
+    }
+    .metric-card {
+        text-align: center;
+        padding: 15px;
+        border-radius: 8px;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+    }
+    .metric-card h4 {
+        margin-bottom: 0;
+        font-weight: 700;
+    }
+    .metric-card small {
+        color: #6c757d;
+    }
+    #progressBar {
+        transition: width 0.5s ease-in-out;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>NeRF Training: {{ subject_id }}</h2>
+    <span id="statusBadge" class="badge bg-secondary status-badge">Not Started</span>
+</div>
+
+<!-- Training Parameters -->
+<div class="card mb-4" id="paramsCard">
+    <div class="card-body">
+        <h5 class="card-title">Training Parameters</h5>
+        <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label for="num_epochs" class="form-label">Epochs</label>
+                <input type="number" id="num_epochs" class="form-control" value="50" min="1" max="500">
+                <div class="form-text">Number of training epochs</div>
+            </div>
+            <div class="col-md-3">
+                <label for="learning_rate" class="form-label">Learning Rate</label>
+                <input type="number" id="learning_rate" class="form-control" value="0.0001" step="0.00001" min="0.000001" max="0.01">
+                <div class="form-text">Optimizer learning rate</div>
+            </div>
+            <div class="col-md-3">
+                <label for="num_rays" class="form-label">Rays per Batch</label>
+                <input type="number" id="num_rays" class="form-control" value="1024" min="128" max="8192" step="128">
+                <div class="form-text">Number of rays sampled per batch</div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label d-block">&nbsp;</label>
+                <button id="startTraining" class="btn btn-primary w-100">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-play-fill me-1" viewBox="0 0 16 16" style="vertical-align: text-bottom;">
+                        <path d="m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393z"/>
+                    </svg>
+                    Start Training
+                </button>
+            </div>
+        </div>
+
+        <!-- Advanced Parameters (collapsed) -->
+        <div class="mt-3">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#advancedParams" role="button" aria-expanded="false">
+                Advanced Parameters
+            </a>
+            <div class="collapse mt-2" id="advancedParams">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label for="near_plane" class="form-label">Near Plane</label>
+                        <input type="number" id="near_plane" class="form-control" value="0.1" step="0.01" min="0.01">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="far_plane" class="form-label">Far Plane</label>
+                        <input type="number" id="far_plane" class="form-control" value="4.0" step="0.1" min="1.0">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="num_samples" class="form-label">Samples per Ray</label>
+                        <input type="number" id="num_samples" class="form-control" value="64" min="16" max="256" step="16">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="batch_size" class="form-label">Batch Size</label>
+                        <input type="number" id="batch_size" class="form-control" value="4" min="1" max="32">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Progress Section (hidden until training starts) -->
+<div id="progressSection" style="display: none;">
+    <!-- Progress Bar -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between mb-2">
+                <span id="epochText" class="fw-bold">Epoch 0 / 50</span>
+                <span id="etaText" class="text-muted">ETA: calculating...</span>
+            </div>
+            <div class="progress" style="height: 30px;">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                    0%
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Metrics -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="metric-card">
+                <h4 id="currentLoss">--</h4>
+                <small>Current Loss</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card">
+                <h4 id="currentPSNR">--</h4>
+                <small>Current PSNR (dB)</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card">
+                <h4 id="bestPSNR">--</h4>
+                <small>Best PSNR (dB)</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card">
+                <h4 id="elapsed">--</h4>
+                <small>Elapsed Time</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Training Loss</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="lossChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">PSNR (dB)</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="psnrChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Training Log -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h6 class="mb-0">Training Log</h6>
+            <button class="btn btn-sm btn-outline-secondary" id="clearLog">Clear</button>
+        </div>
+        <div class="card-body p-0">
+            <pre id="trainingLog" class="mb-0 p-3" style="max-height: 200px; overflow-y: auto; background: #212529; color: #f8f9fa; font-size: 0.85rem; border-radius: 0 0 8px 8px;"></pre>
+        </div>
+    </div>
+</div>
+
+<!-- Completion Section (hidden until training completes) -->
+<div id="completionSection" style="display: none;">
+    <div class="card border-success">
+        <div class="card-body text-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="bi bi-check-circle text-success mb-3" viewBox="0 0 16 16">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="M10.97 4.97a.235.235 0 0 0-.02.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-1.071-1.05z"/>
+            </svg>
+            <h3>Training Complete!</h3>
+            <p class="text-muted">Your 3D model has been generated successfully.</p>
+            <div class="row justify-content-center mt-4">
+                <div class="col-md-3">
+                    <div class="metric-card">
+                        <h4 id="finalPSNR">--</h4>
+                        <small>Final PSNR (dB)</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card">
+                        <h4 id="finalLoss">--</h4>
+                        <small>Final Loss</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card">
+                        <h4 id="totalTime">--</h4>
+                        <small>Total Time</small>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4">
+                <a id="viewerLink" href="/viewer/{{ subject_id }}" class="btn btn-success btn-lg">
+                    View 3D Model
+                </a>
+                <a href="/results/{{ subject_id }}" class="btn btn-outline-primary btn-lg ms-2">
+                    Back to Results
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const subjectId = '{{ subject_id }}';
+    let trainingId = null;
+    let pollInterval = null;
+    let startTime = null;
+
+    // Chart data arrays
+    const lossData = { labels: [], values: [] };
+    const psnrData = { labels: [], values: [] };
+
+    // Initialize loss chart
+    const lossCtx = document.getElementById('lossChart').getContext('2d');
+    const lossChart = new Chart(lossCtx, {
+        type: 'line',
+        data: {
+            labels: lossData.labels,
+            datasets: [{
+                label: 'Loss',
+                data: lossData.values,
+                borderColor: '#dc3545',
+                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: 'Epoch' } },
+                y: { title: { display: true, text: 'Loss' }, beginAtZero: false }
+            },
+            plugins: {
+                legend: { display: false }
+            },
+            animation: { duration: 300 }
+        }
+    });
+
+    // Initialize PSNR chart
+    const psnrCtx = document.getElementById('psnrChart').getContext('2d');
+    const psnrChart = new Chart(psnrCtx, {
+        type: 'line',
+        data: {
+            labels: psnrData.labels,
+            datasets: [{
+                label: 'PSNR (dB)',
+                data: psnrData.values,
+                borderColor: '#198754',
+                backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: 'Epoch' } },
+                y: { title: { display: true, text: 'PSNR (dB)' }, beginAtZero: false }
+            },
+            plugins: {
+                legend: { display: false }
+            },
+            animation: { duration: 300 }
+        }
+    });
+
+    // Start Training button
+    document.getElementById('startTraining').addEventListener('click', function() {
+        const params = {
+            subject_id: subjectId,
+            num_epochs: parseInt(document.getElementById('num_epochs').value),
+            learning_rate: parseFloat(document.getElementById('learning_rate').value),
+            num_rays: parseInt(document.getElementById('num_rays').value),
+            near_plane: parseFloat(document.getElementById('near_plane').value),
+            far_plane: parseFloat(document.getElementById('far_plane').value),
+            num_samples: parseInt(document.getElementById('num_samples').value),
+            batch_size: parseInt(document.getElementById('batch_size').value)
+        };
+
+        // Disable the button and show progress
+        this.disabled = true;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Starting...';
+
+        // Disable all parameter inputs
+        document.querySelectorAll('#paramsCard input').forEach(function(input) {
+            input.disabled = true;
+        });
+
+        fetch('/api/start-training', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
+        })
+        .then(function(response) {
+            if (!response.ok) throw new Error('Failed to start training');
+            return response.json();
+        })
+        .then(function(data) {
+            trainingId = data.training_id;
+            startTime = Date.now();
+
+            // Show progress section
+            document.getElementById('progressSection').style.display = 'block';
+            document.getElementById('statusBadge').textContent = 'Training';
+            document.getElementById('statusBadge').className = 'badge bg-primary status-badge';
+
+            // Update button
+            const btn = document.getElementById('startTraining');
+            btn.innerHTML = 'Training in Progress...';
+            btn.className = 'btn btn-secondary w-100';
+
+            appendLog('Training started with ID: ' + trainingId);
+            appendLog('Parameters: epochs=' + params.num_epochs + ', lr=' + params.learning_rate + ', rays=' + params.num_rays);
+
+            // Start polling
+            pollInterval = setInterval(pollStatus, 2000);
+        })
+        .catch(function(error) {
+            alert('Error starting training: ' + error.message);
+            const btn = document.getElementById('startTraining');
+            btn.disabled = false;
+            btn.innerHTML = 'Start Training';
+            document.querySelectorAll('#paramsCard input').forEach(function(input) {
+                input.disabled = false;
+            });
+        });
+    });
+
+    // Poll training status
+    function pollStatus() {
+        if (!trainingId) return;
+
+        fetch('/api/training-status/' + trainingId)
+        .then(function(response) {
+            if (!response.ok) throw new Error('Failed to fetch status');
+            return response.json();
+        })
+        .then(function(data) {
+            updateProgress(data);
+
+            if (data.status === 'completed') {
+                clearInterval(pollInterval);
+                onTrainingComplete(data);
+            } else if (data.status === 'failed') {
+                clearInterval(pollInterval);
+                onTrainingFailed(data);
+            }
+        })
+        .catch(function(error) {
+            console.error('Polling error:', error);
+            appendLog('Warning: Failed to fetch training status');
+        });
+    }
+
+    // Update progress UI
+    function updateProgress(data) {
+        const epoch = data.current_epoch || 0;
+        const totalEpochs = data.total_epochs || 1;
+        const percent = Math.round((epoch / totalEpochs) * 100);
+
+        // Progress bar
+        const bar = document.getElementById('progressBar');
+        bar.style.width = percent + '%';
+        bar.textContent = percent + '%';
+        bar.setAttribute('aria-valuenow', percent);
+
+        // Epoch text
+        document.getElementById('epochText').textContent = 'Epoch ' + epoch + ' / ' + totalEpochs;
+
+        // ETA
+        if (epoch > 0 && startTime) {
+            const elapsedMs = Date.now() - startTime;
+            const msPerEpoch = elapsedMs / epoch;
+            const remainingMs = msPerEpoch * (totalEpochs - epoch);
+            document.getElementById('etaText').textContent = 'ETA: ' + formatDuration(remainingMs);
+        }
+
+        // Metrics
+        if (data.loss !== undefined && data.loss !== null) {
+            document.getElementById('currentLoss').textContent = data.loss.toFixed(6);
+        }
+        if (data.psnr !== undefined && data.psnr !== null) {
+            document.getElementById('currentPSNR').textContent = data.psnr.toFixed(2);
+        }
+        if (data.best_psnr !== undefined && data.best_psnr !== null) {
+            document.getElementById('bestPSNR').textContent = data.best_psnr.toFixed(2);
+        }
+
+        // Elapsed time
+        if (startTime) {
+            document.getElementById('elapsed').textContent = formatDuration(Date.now() - startTime);
+        }
+
+        // Update charts
+        if (data.loss !== undefined && data.loss !== null && epoch > 0) {
+            // Only add if we have a new epoch
+            if (lossData.labels.length === 0 || lossData.labels[lossData.labels.length - 1] !== epoch) {
+                lossData.labels.push(epoch);
+                lossData.values.push(data.loss);
+                lossChart.update();
+            }
+        }
+        if (data.psnr !== undefined && data.psnr !== null && epoch > 0) {
+            if (psnrData.labels.length === 0 || psnrData.labels[psnrData.labels.length - 1] !== epoch) {
+                psnrData.labels.push(epoch);
+                psnrData.values.push(data.psnr);
+                psnrChart.update();
+            }
+        }
+
+        // Log message
+        if (data.message) {
+            appendLog(data.message);
+        }
+    }
+
+    // Training completed
+    function onTrainingComplete(data) {
+        document.getElementById('statusBadge').textContent = 'Completed';
+        document.getElementById('statusBadge').className = 'badge bg-success status-badge';
+
+        // Stop the progress bar animation
+        const bar = document.getElementById('progressBar');
+        bar.style.width = '100%';
+        bar.textContent = '100%';
+        bar.classList.remove('progress-bar-animated');
+        bar.classList.add('bg-success');
+
+        // Show completion section
+        document.getElementById('completionSection').style.display = 'block';
+
+        if (data.psnr !== undefined) {
+            document.getElementById('finalPSNR').textContent = data.psnr.toFixed(2);
+        }
+        if (data.loss !== undefined) {
+            document.getElementById('finalLoss').textContent = data.loss.toFixed(6);
+        }
+        if (startTime) {
+            document.getElementById('totalTime').textContent = formatDuration(Date.now() - startTime);
+        }
+
+        appendLog('Training completed successfully!');
+
+        // Auto-redirect after 5 seconds
+        appendLog('Redirecting to viewer in 5 seconds...');
+        setTimeout(function() {
+            window.location.href = '/viewer/' + subjectId;
+        }, 5000);
+    }
+
+    // Training failed
+    function onTrainingFailed(data) {
+        document.getElementById('statusBadge').textContent = 'Failed';
+        document.getElementById('statusBadge').className = 'badge bg-danger status-badge';
+
+        const bar = document.getElementById('progressBar');
+        bar.classList.remove('progress-bar-animated');
+        bar.classList.add('bg-danger');
+
+        appendLog('ERROR: Training failed - ' + (data.error || 'Unknown error'));
+
+        // Re-enable the start button for retry
+        const btn = document.getElementById('startTraining');
+        btn.disabled = false;
+        btn.innerHTML = 'Retry Training';
+        btn.className = 'btn btn-warning w-100';
+        document.querySelectorAll('#paramsCard input').forEach(function(input) {
+            input.disabled = false;
+        });
+    }
+
+    // Append message to training log
+    function appendLog(message) {
+        const log = document.getElementById('trainingLog');
+        const timestamp = new Date().toLocaleTimeString();
+        log.textContent += '[' + timestamp + '] ' + message + '\n';
+        log.scrollTop = log.scrollHeight;
+    }
+
+    // Clear log button
+    document.getElementById('clearLog').addEventListener('click', function() {
+        document.getElementById('trainingLog').textContent = '';
+    });
+
+    // Format duration from milliseconds
+    function formatDuration(ms) {
+        const seconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        if (hours > 0) {
+            return hours + 'h ' + (minutes % 60) + 'm ' + (seconds % 60) + 's';
+        } else if (minutes > 0) {
+            return minutes + 'm ' + (seconds % 60) + 's';
+        } else {
+            return seconds + 's';
+        }
+    }
+});
+</script>
+{% endblock %}
