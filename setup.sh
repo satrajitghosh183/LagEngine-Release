@@ -25,10 +25,10 @@ fi
 
 hr()      { printf "${DIM}"; printf '━%.0s' $(seq 1 72); printf "${NC}\n"; }
 hr_thin() { printf "${DIM}"; printf '─%.0s' $(seq 1 72); printf "${NC}\n"; }
-info()    { printf "  ${BLUE}▸${NC} %s\n" "$*"; }
-ok()      { printf "  ${GREEN}✔${NC} %s\n" "$*"; }
-warn()    { printf "  ${YELLOW}⚠${NC} %s\n" "$*"; }
-fail()    { printf "  ${RED}✘${NC} %s\n" "$*"; }
+info()    { printf "  ${BLUE}>${NC} %s\n" "$*"; }
+ok()      { printf "  ${GREEN}+${NC} %s\n" "$*"; }
+warn()    { printf "  ${YELLOW}!${NC} %s\n" "$*"; }
+fail()    { printf "  ${RED}x${NC} %s\n" "$*"; }
 section() { printf "\n  ${BOLD}${CYAN}%s${NC}\n" "$*"; hr_thin; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -402,7 +402,7 @@ show_main_menu() {
     printf "    ${YELLOW}q${NC}  Quit\n"
     printf "\n"
     hr
-    printf "  ${BOLD}▶ Select: ${NC}"
+    printf "  ${BOLD}> Select: ${NC}"
 }
 
 show_demo_picker() {
@@ -491,7 +491,7 @@ show_rl_menu() {
     printf "\n"
     printf "    ${YELLOW}b${NC}  Back to main menu\n\n"
     hr
-    printf "  ${BOLD}▶ Select: ${NC}"
+    printf "  ${BOLD}> Select: ${NC}"
 }
 
 run_rl_executable() {

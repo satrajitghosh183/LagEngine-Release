@@ -1,0 +1,34 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+\usepackage{hyperref}
+
+\onehalfspacing
+
+\begin{document}
+
+\begin{center}
+\textbf{\Large LAGENGINE: ELIMINATING LAG: A REAL-TIME PHYSICS SIMULATION ENGINE}\\
+\vspace{0.2em}
+\textbf{\Large WITH TEMPLATE-DRIVEN CLASSROOM AUTHORING AND}\\
+\vspace{0.2em}
+\textbf{\Large ADAPTIVE RL-BASED RUNTIME OPTIMISATION}
+
+\vspace{1em}
+Satrajit Ghosh\\
+Master of Science Candidate\\
+Electrical and Computer Engineering\\
+Rutgers University--New Brunswick
+
+\vspace{1em}
+\textbf{Abstract}
+\end{center}
+
+Interactive physics demonstrations are widely used in science and engineering education; however, existing tools present a persistent trade-off between accessibility and performance. Full-scale game engines offer advanced rendering and physically accurate simulation but require substantial programming expertise and configuration effort, rendering them unsuitable for most classroom practitioners. Conversely, lightweight educational platforms often provide simplified interfaces at the expense of physical fidelity, extensibility, and reliable performance on heterogeneous, low-power hardware commonly found in instructional environments. This gap constrains educators who seek to deploy real-time, visually rich, and conceptually rigorous simulations without engaging in low-level engine development or manual performance tuning.
+
+This thesis introduces \textit{LAGEngine: Eliminating Lag: A Real-Time Physics Simulation Engine with Template-Driven Classroom Authoring and Adaptive RL-Based Runtime Optimisation}, a unified C++17-based 3D engine that integrates advanced simulation, rendering, authoring, and adaptive optimisation within a single architecture. The first layer consists of a custom-built engine core featuring rigid body dynamics, XPBD-based soft body and cloth simulation, SPH fluid systems, constraint solvers, deferred physically based rendering, an Entity--Component System with JSON serialisation, Lua scripting, robotics kinematics, and a multithreaded job system with GPU-driven submission. The second layer provides an educator-facing visual editor built with Dear ImGui, offering template-driven, low-code authoring workflows that expose high-level simulation parameters while abstracting engine complexity. The third layer embeds a passive reinforcement learning auto-tuner that observes runtime telemetry and learns cross-session configuration policies to promote stable frame times on heterogeneous classroom hardware.
+
+Together, these contributions demonstrate that template-driven authoring, a performance-oriented multithreaded runtime, and an integrated RL-based optimisation layer can be cohesively combined to enable accessible yet high-fidelity physics simulation suitable for low-power educational settings.
+
+\end{document}

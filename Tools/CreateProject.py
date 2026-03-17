@@ -161,7 +161,7 @@ cmake --build .
     readme_file.write_text(readme_content)
     print(f"Created: {readme_file}")
     
-    print(f"\n✅ Project '{name}' created successfully at {project_path}")
+    print(f"\nProject '{name}' created successfully at {project_path}")
     print(f"\nNext steps:")
     print(f"  cd {project_path}")
     print(f"  mkdir build && cd build")
