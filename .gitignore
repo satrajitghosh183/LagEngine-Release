@@ -203,3 +203,6 @@ Live-working-demos/**/__pycache__/
 # Specific large files
 Live-working-demos/10-neural-character-generation/fdnerf/src/data_process/AlignmentCode/shape_predictor_68_face_landmarks.dat
 Live-working-demos/10-neural-character-generation/fdnerf/src/data_process/SegmentCode/Seg_79999_iter.pth
+.claude/
+.cursor/
+.vscode/
