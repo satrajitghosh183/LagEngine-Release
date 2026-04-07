@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact-name: LAGEngine-linux-x64
+            archive-ext: tar.gz
+          - os: windows-2022
+            artifact-name: LAGEngine-windows-x64
+            archive-ext: zip
+          - os: macos-13
+            artifact-name: LAGEngine-macos-x64
+            archive-ext: zip
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ── Linux dependencies ──────────────────────────────────────────────
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git pkg-config \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libglfw3-dev libglm-dev libglew-dev \
+            libopenal-dev libassimp-dev libeigen3-dev
+
+      # ── macOS dependencies ──────────────────────────────────────────────
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake glfw glm glew openal-soft assimp eigen pkg-config
+
+      # ── Windows dependencies ────────────────────────────────────────────
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # ── Configure & Build ───────────────────────────────────────────────
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTS=OFF
+          -DBUILD_EDITOR=ON
+          -DBUILD_EXAMPLES=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # ── Package (Linux) ─────────────────────────────────────────────────
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p staging/${{ matrix.artifact-name }}
+          cp -r build/bin/* staging/${{ matrix.artifact-name }}/
+          cp -r Assets/Shaders staging/${{ matrix.artifact-name }}/
+          cp -r Content staging/${{ matrix.artifact-name }}/ 2>/dev/null || true
+          cp LICENSE README.md staging/${{ matrix.artifact-name }}/
+          cd staging
+          tar czf ../${{ matrix.artifact-name }}.tar.gz ${{ matrix.artifact-name }}
+
+      # ── Package (Windows) ───────────────────────────────────────────────
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging/${{ matrix.artifact-name }}
+          Copy-Item -Recurse build/bin/Release/* staging/${{ matrix.artifact-name }}/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse build/bin/* staging/${{ matrix.artifact-name }}/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse Assets/Shaders staging/${{ matrix.artifact-name }}/
+          if (Test-Path Content) { Copy-Item -Recurse Content staging/${{ matrix.artifact-name }}/ }
+          Copy-Item LICENSE, README.md staging/${{ matrix.artifact-name }}/
+          Compress-Archive -Path staging/${{ matrix.artifact-name }} -DestinationPath ${{ matrix.artifact-name }}.zip
+
+      # ── Package (macOS) ─────────────────────────────────────────────────
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p staging/${{ matrix.artifact-name }}
+          cp -r build/bin/* staging/${{ matrix.artifact-name }}/
+          cp -r Assets/Shaders staging/${{ matrix.artifact-name }}/
+          cp -r Content staging/${{ matrix.artifact-name }}/ 2>/dev/null || true
+          cp LICENSE README.md staging/${{ matrix.artifact-name }}/
+          cd staging
+          zip -r ../${{ matrix.artifact-name }}.zip ${{ matrix.artifact-name }}
+
+      # ── Upload artifact ─────────────────────────────────────────────────
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-name }}.${{ matrix.archive-ext }}
+          retention-days: 5
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-22.04
+    needs: build-release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LAG Engine ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          files: |
+            release-assets/*
+          body: |
+            ## LAG Engine ${{ github.ref_name }}
+
+            ### Downloads
+
+            | Platform | File |
+            |----------|------|
+            | Linux (x64) | `LAGEngine-linux-x64.tar.gz` |
+            | Windows (x64) | `LAGEngine-windows-x64.zip` |
+            | macOS (x64) | `LAGEngine-macos-x64.zip` |
+
+            ### Checksums
+
+            SHA256 checksums are provided in `SHA256SUMS.txt`.
+
+            ### Build from Source
+
+            ```bash
+            git clone https://github.com/satrajitghosh183/LAGEngine.git
+            cd LAGEngine
+            bash setup.sh --build-engine
+            ```
+
+            See the [CHANGELOG](https://github.com/satrajitghosh183/LAGEngine/blob/main/CHANGELOG.md) for a full list of changes.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,110 @@
+name: Feature Request
+description: Suggest a new feature or improvement for LAG Engine
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature! Please describe your idea so we can evaluate and discuss it.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature Description
+      description: A clear and concise description of the feature you would like.
+      placeholder: Describe the feature...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case / Motivation
+      description: Why is this feature needed? What problem does it solve? Describe the scenario where this would be useful.
+      placeholder: |
+        As a user of the engine, I want to...
+        This would help with...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: If you have a specific idea for how this could be implemented, describe it here. Include API sketches, pseudocode, or architecture notes if applicable.
+      placeholder: |
+        A possible approach would be...
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions Considered
+      description: Have you considered any alternative approaches? Why are they less suitable?
+      placeholder: |
+        I also considered...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Which area of the engine does this feature relate to?
+      options:
+        - Graphics / Rendering
+        - Physics
+        - Editor
+        - Audio
+        - Scripting (Lua)
+        - Scene / Entity System
+        - Animation
+        - Build System
+        - Platform Support
+        - Documentation
+        - Testing
+        - RL Backend
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Suggestion
+      description: How important do you consider this feature?
+      options:
+        - Nice to have - Would improve the experience
+        - Important - Fills a significant gap
+        - Critical - Blocking adoption or major workflows
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you be willing to help implement this feature?
+      options:
+        - label: I am willing to submit a pull request for this feature.
+          required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context, references, mockups, or screenshots relevant to this feature request.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues and feature requests to confirm this is not a duplicate.
+          required: true

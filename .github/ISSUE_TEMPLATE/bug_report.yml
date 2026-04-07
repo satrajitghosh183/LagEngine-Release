@@ -1,0 +1,167 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in LAG Engine
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug. Please fill out the sections below so we can reproduce and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+      placeholder: Describe the bug...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: List the steps needed to reproduce the behavior.
+      placeholder: |
+        1. Open the editor
+        2. Load scene '...'
+        3. Click on '...'
+        4. Observe error in '...'
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: Describe the expected behavior...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened instead?
+      placeholder: Describe the actual behavior...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Which operating system are you using?
+      options:
+        - Windows 10
+        - Windows 11
+        - Ubuntu 22.04
+        - Ubuntu 24.04
+        - Fedora
+        - Arch Linux
+        - Other Linux
+        - macOS 13 (Ventura)
+        - macOS 14 (Sonoma)
+        - macOS 15 (Sequoia)
+        - Other (please specify in description)
+    validations:
+      required: true
+
+  - type: input
+    id: engine-version
+    attributes:
+      label: Engine Version
+      description: Which version of LAG Engine are you using? (e.g., v1.0.0 or commit hash)
+      placeholder: "v1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: compiler
+    attributes:
+      label: Compiler & Version
+      description: Which compiler did you use to build? (e.g., GCC 12, Clang 15, MSVC 17.8)
+      placeholder: "GCC 12.3"
+    validations:
+      required: false
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU & Driver Version
+      description: For rendering issues, please include your GPU model and driver version.
+      placeholder: "NVIDIA RTX 3060, driver 535.154"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severely does this impact your work?
+      options:
+        - Low - Minor inconvenience, easy workaround
+        - Medium - Blocks some workflows, workaround exists
+        - High - Major feature broken, no workaround
+        - Critical - Crash, data loss, or security issue
+    validations:
+      required: true
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: Which part of the engine is affected?
+      options:
+        - Graphics / Rendering
+        - Physics (Rigid Body)
+        - Physics (Soft Body / Cloth)
+        - Physics (Fluids / SPH)
+        - Audio
+        - Editor
+        - Scripting (Lua)
+        - Scene / Entity System
+        - Animation
+        - Build System / CMake
+        - Platform / Window
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & Error Output
+      description: Paste any relevant log output, error messages, or stack traces.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots or screen recordings to help explain the problem. Drag and drop images here.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context about the problem (related issues, recent changes, etc.).
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues to confirm this is not a duplicate.
+          required: true
+        - label: I have tested with the latest version from the main branch.
+          required: false

@@ -131,6 +131,14 @@ namespace GameEngine {
         void LoadCharacterDemo();
         void LoadCannonShootingDemo();  // 2D Cannon shooting cloth demo
         void LoadVerletClothDemo();     // Verlet-integrated cloth + cannon
+        void LoadSpringBlockDemo();     // Spring-block simulator (Live Demo 11)
+        void LoadParticleSystemDemo();  // Particle system with collision (Live Demo 04)
+        void Load2DPhysicsDemo();       // 2D physics playground
+        void LoadTerrainDemo();         // Procedural terrain demo
+        void LoadPostProcessingDemo();  // Post-processing showcase
+
+        // Register all demos in the WelcomePanel
+        void RegisterDemos();
 
         // Asset drop from browser to viewport
         void OnAssetDroppedInViewport(const std::string& assetPath);
@@ -186,6 +194,9 @@ namespace GameEngine {
 
         // Error recovery
         std::string m_LastError;
+
+        // Deferred actions (executed at beginning of next frame, outside ImGui render)
+        std::vector<std::function<void()>> m_DeferredActions;
         
     public:
         // Public accessors for panels

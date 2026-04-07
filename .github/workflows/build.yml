@@ -1,0 +1,201 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            cmake-preset: linux
+            build-type: Release
+          - os: windows-2022
+            cmake-preset: windows
+            build-type: Release
+          - os: macos-13
+            cmake-preset: macos
+            build-type: Release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ── Linux dependencies ──────────────────────────────────────────────
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git pkg-config \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libglfw3-dev libglm-dev libglew-dev \
+            libopenal-dev libassimp-dev libeigen3-dev \
+            xvfb
+
+      # ── macOS dependencies ──────────────────────────────────────────────
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake glfw glm glew openal-soft assimp eigen pkg-config
+
+      # ── Windows dependencies ────────────────────────────────────────────
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # ── Cache External/ directory ───────────────────────────────────────
+      - name: Cache External dependencies
+        uses: actions/cache@v4
+        with:
+          path: External
+          key: external-${{ runner.os }}-${{ hashFiles('External/CMakeLists.txt') }}
+          restore-keys: |
+            external-${{ runner.os }}-
+
+      # ── Cache CMake build directory ─────────────────────────────────────
+      - name: Cache build directory
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-${{ runner.os }}-${{ matrix.build-type }}-${{ hashFiles('CMakeLists.txt', 'Engine/CMakeLists.txt', 'Editor/CMakeLists.txt') }}
+          restore-keys: |
+            build-${{ runner.os }}-${{ matrix.build-type }}-
+
+      # ── Configure ───────────────────────────────────────────────────────
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DBUILD_TESTS=ON
+          -DBUILD_EDITOR=ON
+          -DBUILD_EXAMPLES=ON
+
+      # ── Build ───────────────────────────────────────────────────────────
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build-type }} --parallel
+
+      # ── Upload build artifacts ──────────────────────────────────────────
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: build/bin/
+          retention-days: 7
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            build-type: Release
+          - os: windows-2022
+            build-type: Release
+          - os: macos-13
+            build-type: Release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ── Linux dependencies ──────────────────────────────────────────────
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git pkg-config \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libglfw3-dev libglm-dev libglew-dev \
+            libopenal-dev libassimp-dev libeigen3-dev \
+            xvfb
+
+      # ── macOS dependencies ──────────────────────────────────────────────
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake glfw glm glew openal-soft assimp eigen pkg-config
+
+      # ── Windows dependencies ────────────────────────────────────────────
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # ── Cache External/ directory ───────────────────────────────────────
+      - name: Cache External dependencies
+        uses: actions/cache@v4
+        with:
+          path: External
+          key: external-${{ runner.os }}-${{ hashFiles('External/CMakeLists.txt') }}
+          restore-keys: |
+            external-${{ runner.os }}-
+
+      # ── Rebuild (needed since test job runs on fresh runner) ────────────
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DBUILD_TESTS=ON
+          -DBUILD_EDITOR=OFF
+          -DBUILD_EXAMPLES=OFF
+
+      - name: Build tests
+        run: cmake --build build --config ${{ matrix.build-type }} --parallel
+
+      # ── Run tests ───────────────────────────────────────────────────────
+      - name: Run tests (Linux, with virtual framebuffer)
+        if: runner.os == 'Linux'
+        run: |
+          cd build
+          xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" \
+            ctest --build-config ${{ matrix.build-type }} --output-on-failure --timeout 120
+
+      - name: Run tests (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: |
+          cd build
+          ctest --build-config ${{ matrix.build-type }} --output-on-failure --timeout 120
+
+      # ── Publish test results ────────────────────────────────────────────
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: build/Testing/
+          retention-days: 7
+
+  status:
+    name: CI Status
+    runs-on: ubuntu-22.04
+    needs: [build, test]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.build.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "::error::One or more jobs failed."
+            exit 1
+          fi
+          echo "All jobs passed."

@@ -15,6 +15,8 @@ file(GLOB_RECURSE ENGINE_SOURCES
     "Animation/*.cpp"
     "UI/*.cpp"
     "Robotics/*.cpp"
+    "Navigation/*.cpp"
+    "Networking/*.cpp"
 )
 
 file(GLOB_RECURSE ENGINE_HEADERS
@@ -33,6 +35,8 @@ file(GLOB_RECURSE ENGINE_HEADERS
     "Animation/*.hpp"
     "UI/*.hpp"
     "Robotics/*.hpp"
+    "Navigation/*.hpp"
+    "Networking/*.hpp"
 )
 
 # Create engine library
@@ -97,7 +101,7 @@ endif()
 
 # Platform-specific libraries
 if(WIN32)
-    target_link_libraries(GameEngine PRIVATE opengl32 winhttp)
+    target_link_libraries(GameEngine PRIVATE opengl32 winhttp ws2_32)
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(GameEngine PRIVATE GL X11 pthread dl)
 elseif(APPLE)

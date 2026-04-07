@@ -126,6 +126,26 @@ target_include_directories(LegacyParticles PRIVATE
     ${ENGINE_INCLUDE_DIR}
 )
 
+# Example 11: Terrain Demo
+add_executable(TerrainDemo
+    11_TerrainDemo/TerrainDemo.cpp
+)
+target_link_libraries(TerrainDemo PRIVATE GameEngine imgui)
+target_include_directories(TerrainDemo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${ENGINE_INCLUDE_DIR}
+)
+
+# Example 12: Visual Scripting Demo
+add_executable(VisualScriptingDemo
+    12_VisualScripting/VisualScriptingDemo.cpp
+)
+target_link_libraries(VisualScriptingDemo PRIVATE GameEngine imgui)
+target_include_directories(VisualScriptingDemo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${ENGINE_INCLUDE_DIR}
+)
+
 # Set output directory
 set_target_properties(
     HelloTriangle
@@ -139,6 +159,8 @@ set_target_properties(
     HXPBDPhysics
     FlagSimulation
     LegacyParticles
+    TerrainDemo
+    VisualScriptingDemo
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
@@ -156,5 +178,7 @@ install(TARGETS
     HXPBDPhysics
     FlagSimulation
     LegacyParticles
+    TerrainDemo
+    VisualScriptingDemo
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
