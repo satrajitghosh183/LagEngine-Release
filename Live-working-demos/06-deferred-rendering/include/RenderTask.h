@@ -19,11 +19,13 @@ enum class TaskType {
 };
 
 enum class TaskExecutor {
-    OpenGL_MainThread,  // Rendering tasks (main thread only)
+    OpenGL_MainThread,  // Rendering tasks (main thread only) -- now Vulkan
     CUDA_Stream,        // CUDA compute (parallel streams)
-    CPU_Worker          // CPU-side work (parallel threads, no GL)
+    CPU_Worker          // CPU-side work (parallel threads)
 };
 
+// Pipeline state descriptor used for work-stealing cost heuristics.
+// Named GLState for backward compat but contains abstract IDs.
 struct GLState {
     uint32_t shaderID = 0;
     uint32_t fboID = 0;
@@ -35,11 +37,11 @@ struct GLState {
 class RenderTask {
 public:
     RenderTask(TaskType type, const std::string& name, float costEstimate = 1.0f, TaskExecutor executor = TaskExecutor::OpenGL_MainThread);
-    
+
     void addDependency(std::shared_ptr<RenderTask> dep);
     void execute();
     void setExecuteFunc(std::function<void()> func);
-    
+
     TaskType getType() const { return m_type; }
     TaskExecutor getExecutor() const { return m_executor; }
     const std::string& getName() const { return m_name; }
@@ -47,11 +49,11 @@ public:
     const std::vector<std::weak_ptr<RenderTask>>& getDependencies() const { return m_dependencies; }
     const GLState& getGLState() const { return m_glState; }
     void setGLState(const GLState& state) { m_glState = state; }
-    
+
     void markComplete() { m_complete = true; }
     bool isComplete() const { return m_complete; }
     void reset() { m_complete = false; }
-    
+
     // CUDA stream assignment (for CUDA_Stream tasks)
     void setCudaStream(int streamIndex) { m_cudaStreamIndex = streamIndex; }
     int getCudaStreamIndex() const { return m_cudaStreamIndex; }
@@ -67,7 +69,6 @@ private:
     GLState m_glState;
     std::function<void()> m_executeFunc;
     bool m_complete;
-    int m_cudaStreamIndex;  // Which CUDA stream to use (for CUDA_Stream tasks)
-    void* m_cudaStreamPtr;  // Actual CUDA stream pointer (for CUDA_Stream tasks)
+    int m_cudaStreamIndex;
+    void* m_cudaStreamPtr;
 };
-

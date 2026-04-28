@@ -1,44 +1,40 @@
 # 02 - Spring Cloth Simulation
 
-Spring-mass cloth and flag simulation using the PartyKel physics library.
-Interactive parameter tweaking via AntTweakBar.
+Spring-mass cloth and flag simulation with interactive parameter tweaking.
 
 ## Features
 
 - Hook force and brake force model for cloth dynamics
-- Multiple demo executables built from `src/` (one per .cpp file)
-- Real-time parameter adjustment (stiffness, damping, wind) via AntTweakBar GUI
-- OpenGL rendering with SDL windowing
+- Octree-based self-collision detection
+- Sphere collision obstacles
+- Real-time parameter adjustment (stiffness, damping, wind) via ImGui
+- Vulkan rendering with GLFW windowing (via shared VulkanBase library)
+- Wireframe / solid toggle
 
 ## Dependencies
 
-System packages:
-
-- SDL 1.2
-- OpenGL
-- GLEW
-
-On Debian-based systems:
-
-```bash
-sudo apt install libsdl1.2-dev libglew-dev libgl1-mesa-dev
-```
-
-Vendored (included in source tree):
-
-- AntTweakBar (in `third-party/`)
-- GLM (in `third-party/include/`)
+- Vulkan SDK (with shaderc for runtime GLSL-to-SPIR-V compilation)
+- GLFW (provided transitively by VulkanBase)
+- GLM (provided transitively by VulkanBase)
+- ImGui with Vulkan backend (provided transitively by VulkanBase)
 
 ## Build
 
 ```bash
 mkdir build && cd build
 cmake ..
-make
+cmake --build . -j$(nproc)
 ```
 
-Each `.cpp` file in `src/` produces its own executable.
+## Controls
+
+- **Left-click drag**: Orbit camera
+- **Scroll wheel**: Zoom
+- **Space**: Toggle wireframe
+- **Arrow keys**: Move first sphere obstacle
+- **Numpad +/-**: Adjust wind velocity
+- **Escape**: Quit
 
 ## Language
 
-C++11
+C++17

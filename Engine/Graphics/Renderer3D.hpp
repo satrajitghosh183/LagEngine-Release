@@ -6,60 +6,54 @@
 #include "Camera3D.hpp"
 #include "Shader.hpp"
 #include "Light.hpp"
-#include "ShadowMap.hpp"
 #include "UniformBuffer.hpp"
 #include "Frustum.hpp"
+#include "Vulkan/VulkanDescriptors.hpp"
+#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <algorithm>
 
 namespace GameEngine {
 
-    /**
-     * @brief Light data for rendering (with position/direction)
-     */
     struct LightData {
         Light Properties;
-        glm::vec3 Position;     // For point/spot lights
-        glm::vec3 Direction;    // For directional/spot lights
+        glm::vec3 Position;
+        glm::vec3 Direction;
     };
 
-    /**
-     * @brief Draw command queued during Submit()
-     */
     struct DrawCommand {
         Ref<Mesh3D> Mesh;
         Ref<Material> Mat;
-        Ref<Shader> ShaderOnly;   // Used when submitting with shader instead of material
+        Ref<Shader> ShaderOnly;
         glm::mat4 Transform;
-        uint64_t SortKey = 0;     // For sorting: shader ID << 32 | material hash
+        uint64_t SortKey = 0;
     };
 
     /**
-     * @brief 3D Renderer
+     * @brief 3D Renderer (Vulkan)
      *
      * Deferred-submit renderer: Submit() queues draw commands,
-     * EndScene() sorts by material/shader and flushes.
+     * EndScene() sorts by material/shader and records to the
+     * active Vulkan command buffer.
      *
-     * Supports multi-pass rendering via RenderGraph integration.
-     *
-     * Usage:
-     *   Renderer3D::BeginScene(camera);
-     *   Renderer3D::Submit(mesh, material, transform);
-     *   Renderer3D::EndScene();       // sorts + draws
+     * Push constants carry per-draw model matrix + normal matrix.
+     * Camera and lighting data go in uniform buffers via descriptor sets.
      */
     class Renderer3D {
     public:
         static void Init();
         static void Shutdown();
 
+        /**
+         * @brief Set the command buffer for this frame's recording
+         */
+        static void SetCommandBuffer(VkCommandBuffer cmd);
+
         static void BeginScene(const Camera3D& camera);
         static void BeginScene(const glm::mat4& viewProjection, const glm::vec3& cameraPosition);
         static void EndScene();
 
-        /**
-         * @brief Submit mesh for rendering (queued, drawn in EndScene)
-         */
         static void Submit(const Ref<Mesh3D>& mesh, const Ref<Material>& material, const glm::mat4& transform = glm::mat4(1.0f));
         static void Submit(const Ref<Mesh3D>& mesh, const Ref<Shader>& shader, const glm::mat4& transform = glm::mat4(1.0f));
 
@@ -70,24 +64,13 @@ namespace GameEngine {
         static const std::vector<LightData>& GetLights() { return s_Lights; }
 
         /**
-         * @brief Apply lighting uniforms to a shader
+         * @brief Flush the render queue for a shadow pass
          */
-        static void ApplyLighting(const Ref<Shader>& shader);
+        static void FlushShadowPass(VkCommandBuffer cmd, VkPipelineLayout layout,
+                                     const glm::mat4& lightSpaceMatrix);
 
-        /**
-         * @brief Flush the render queue for a shadow pass (depth-only)
-         * Renders all queued meshes with the depth shader.
-         */
-        static void FlushShadowPass(const Ref<Shader>& depthShader, const glm::mat4& lightSpaceMatrix);
-
-        /**
-         * @brief Get the current render queue (for external pass implementations)
-         */
         static const std::vector<DrawCommand>& GetRenderQueue() { return s_RenderQueue; }
 
-        /**
-         * @brief Get current scene data
-         */
         static const glm::mat4& GetViewProjection() { return s_SceneData.ViewProjectionMatrix; }
         static const glm::vec3& GetCameraPosition() { return s_SceneData.CameraPosition; }
 
@@ -98,17 +81,21 @@ namespace GameEngine {
             uint32_t VertexCount = 0;
             uint32_t IndexCount = 0;
             uint32_t CulledObjects = 0;
-
-            void Reset() {
-                DrawCalls = 0;
-                VertexCount = 0;
-                IndexCount = 0;
-                CulledObjects = 0;
-            }
+            void Reset() { DrawCalls = 0; VertexCount = 0; IndexCount = 0; CulledObjects = 0; }
         };
 
         static const Statistics& GetStats() { return s_Stats; }
         static void ResetStats() { s_Stats.Reset(); }
+
+        /**
+         * @brief Get per-frame camera UBO descriptor info
+         */
+        static VkDescriptorBufferInfo GetCameraDescriptorInfo();
+
+        /**
+         * @brief Get per-frame lighting UBO descriptor info
+         */
+        static VkDescriptorBufferInfo GetLightingDescriptorInfo();
 
     private:
         static void FlushQueue();
@@ -128,6 +115,9 @@ namespace GameEngine {
         static Statistics s_Stats;
         static std::vector<LightData> s_Lights;
         static std::vector<DrawCommand> s_RenderQueue;
+
+        static VkCommandBuffer s_ActiveCmd;
+        static uint32_t s_CurrentFrame;
 
         static constexpr uint32_t kCameraUBOBinding = 0;
         static constexpr uint32_t kLightingUBOBinding = 1;

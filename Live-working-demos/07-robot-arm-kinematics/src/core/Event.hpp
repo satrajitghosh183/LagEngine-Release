@@ -1,5 +1,9 @@
 #pragma once
 #include "Eigen/Dense"
+
+#ifndef GLFW_INCLUDE_VULKAN
+#define GLFW_INCLUDE_VULKAN
+#endif
 #include "GLFW/glfw3.h"
 
 enum class EventType

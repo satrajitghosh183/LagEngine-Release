@@ -1,132 +1,101 @@
 #pragma once
 
+// =============================================================================
+// OpenGLDevice — STUB (Vulkan-only build)
+//
+// The engine has migrated entirely to Vulkan. This file is intentionally left
+// as an empty shell so that any stale #include references compile without
+// errors while producing no code. No OpenGL symbols are referenced here.
+// =============================================================================
+
 #include "../RHIDevice.hpp"
-#include <glad/glad.h>
 
 namespace GameEngine { namespace RHI {
 
-    // =====================================================================
-    // OpenGL Buffer
-    // =====================================================================
+    // =========================================================================
+    // Stub implementations — all no-ops / return nulls.
+    // These classes exist solely to satisfy the abstract RHIDevice interface.
+    // The Vulkan backend (VulkanDevice / VulkanBuffer / etc.) is the real impl.
+    // =========================================================================
 
     class OpenGLBuffer : public RHIBuffer {
     public:
-        OpenGLBuffer(BufferUsage usage, BufferAccess access, const void* data, size_t size);
-        ~OpenGLBuffer() override;
+        OpenGLBuffer(BufferUsage, BufferAccess, const void*, size_t size) : m_Size(size) {}
+        ~OpenGLBuffer() override = default;
 
-        void bind() override;
-        void unbind() override;
-        void setData(const void* data, size_t size, size_t offset = 0) override;
-        void* map() override;
-        void unmap() override;
+        void bind() override {}
+        void unbind() override {}
+        void setData(const void*, size_t, size_t = 0) override {}
+        void* map() override { return nullptr; }
+        void unmap() override {}
         size_t getSize() const override { return m_Size; }
         BufferUsage getUsage() const override { return m_Usage; }
-        GLuint getHandle() const { return m_Handle; }
 
     private:
-        GLuint m_Handle = 0;
-        GLenum m_Target = GL_ARRAY_BUFFER;
-        GLenum m_GLUsage = GL_STATIC_DRAW;
-        BufferUsage m_Usage;
         size_t m_Size = 0;
+        BufferUsage m_Usage = BufferUsage::Vertex;
     };
-
-    // =====================================================================
-    // OpenGL Shader
-    // =====================================================================
 
     class OpenGLShader : public RHIShader {
     public:
-        OpenGLShader(const std::string& vertexSrc, const std::string& fragmentSrc);
-        ~OpenGLShader() override;
+        OpenGLShader(const std::string&, const std::string&) {}
+        ~OpenGLShader() override = default;
 
-        void bind() override;
-        void unbind() override;
-        void setInt(const std::string& name, int value) override;
-        void setFloat(const std::string& name, float value) override;
-        void setVec2(const std::string& name, const glm::vec2& value) override;
-        void setVec3(const std::string& name, const glm::vec3& value) override;
-        void setVec4(const std::string& name, const glm::vec4& value) override;
-        void setMat3(const std::string& name, const glm::mat3& value) override;
-        void setMat4(const std::string& name, const glm::mat4& value) override;
-        bool isValid() const override { return m_Program != 0; }
-
-    private:
-        GLint getUniformLocation(const std::string& name);
-        GLuint compileShader(GLenum type, const std::string& source);
-
-        GLuint m_Program = 0;
-        std::unordered_map<std::string, GLint> m_UniformCache;
+        void bind() override {}
+        void unbind() override {}
+        void setInt(const std::string&, int) override {}
+        void setFloat(const std::string&, float) override {}
+        void setVec2(const std::string&, const glm::vec2&) override {}
+        void setVec3(const std::string&, const glm::vec3&) override {}
+        void setVec4(const std::string&, const glm::vec4&) override {}
+        void setMat3(const std::string&, const glm::mat3&) override {}
+        void setMat4(const std::string&, const glm::mat4&) override {}
+        bool isValid() const override { return false; }
     };
-
-    // =====================================================================
-    // OpenGL Texture
-    // =====================================================================
 
     class OpenGLTexture : public RHITexture {
     public:
-        OpenGLTexture(const TextureDesc& desc, const void* data);
-        ~OpenGLTexture() override;
+        OpenGLTexture(const TextureDesc& desc, const void*) : m_Width(desc.Width), m_Height(desc.Height) {}
+        ~OpenGLTexture() override = default;
 
-        void bind(uint32_t slot = 0) override;
-        void unbind() override;
-        void setData(const void* data, uint32_t width, uint32_t height) override;
+        void bind(uint32_t = 0) override {}
+        void unbind() override {}
+        void setData(const void*, uint32_t w, uint32_t h) override { m_Width = w; m_Height = h; }
         uint32_t getWidth() const override { return m_Width; }
         uint32_t getHeight() const override { return m_Height; }
-        uint32_t getNativeHandle() const override { return m_Handle; }
+        uint32_t getNativeHandle() const override { return 0; }
 
     private:
-        GLuint m_Handle = 0;
         uint32_t m_Width = 0, m_Height = 0;
-        GLenum m_InternalFormat = GL_RGBA8;
-        GLenum m_DataFormat = GL_RGBA;
     };
-
-    // =====================================================================
-    // OpenGL Framebuffer
-    // =====================================================================
 
     class OpenGLFramebuffer : public RHIFramebuffer {
     public:
-        OpenGLFramebuffer(const FramebufferDesc& desc);
-        ~OpenGLFramebuffer() override;
+        explicit OpenGLFramebuffer(const FramebufferDesc& desc) : m_Desc(desc) {}
+        ~OpenGLFramebuffer() override = default;
 
-        void bind() override;
-        void unbind() override;
-        void resize(uint32_t width, uint32_t height) override;
-        uint32_t getColorAttachment(uint32_t index = 0) const override;
-        uint32_t getDepthAttachment() const override { return m_DepthAttachment; }
+        void bind() override {}
+        void unbind() override {}
+        void resize(uint32_t w, uint32_t h) override { m_Desc.Width = w; m_Desc.Height = h; }
+        uint32_t getColorAttachment(uint32_t = 0) const override { return 0; }
+        uint32_t getDepthAttachment() const override { return 0; }
         uint32_t getWidth() const override { return m_Desc.Width; }
         uint32_t getHeight() const override { return m_Desc.Height; }
 
     private:
-        void invalidate();
-
-        GLuint m_Handle = 0;
-        std::vector<GLuint> m_ColorAttachments;
-        GLuint m_DepthAttachment = 0;
         FramebufferDesc m_Desc;
     };
 
-    // =====================================================================
-    // OpenGL Pipeline
-    // =====================================================================
-
     class OpenGLPipeline : public RHIPipeline {
     public:
-        explicit OpenGLPipeline(const PipelineDesc& desc);
-        void bind() override;
-        void unbind() override;
+        explicit OpenGLPipeline(const PipelineDesc& desc) : m_Desc(desc) {}
+        void bind() override {}
+        void unbind() override {}
         const PipelineDesc& getDesc() const override { return m_Desc; }
 
     private:
         PipelineDesc m_Desc;
-        GLuint m_VAO = 0;
     };
-
-    // =====================================================================
-    // OpenGL Device
-    // =====================================================================
 
     class OpenGLDevice : public RHIDevice {
     public:
@@ -134,20 +103,29 @@ namespace GameEngine { namespace RHI {
         ~OpenGLDevice() override = default;
 
         Ref<RHIBuffer> createBuffer(BufferUsage usage, BufferAccess access,
-                                     const void* data, size_t size) override;
-        Ref<RHIShader> createShader(const std::string& vertexSrc,
-                                     const std::string& fragmentSrc) override;
-        Ref<RHITexture> createTexture(const TextureDesc& desc, const void* data = nullptr) override;
-        Ref<RHIFramebuffer> createFramebuffer(const FramebufferDesc& desc) override;
-        Ref<RHIPipeline> createPipeline(const PipelineDesc& desc) override;
+                                     const void* data, size_t size) override {
+            return CreateRef<OpenGLBuffer>(usage, access, data, size);
+        }
+        Ref<RHIShader> createShader(const std::string& v, const std::string& f) override {
+            return CreateRef<OpenGLShader>(v, f);
+        }
+        Ref<RHITexture> createTexture(const TextureDesc& desc, const void* data = nullptr) override {
+            return CreateRef<OpenGLTexture>(desc, data);
+        }
+        Ref<RHIFramebuffer> createFramebuffer(const FramebufferDesc& desc) override {
+            return CreateRef<OpenGLFramebuffer>(desc);
+        }
+        Ref<RHIPipeline> createPipeline(const PipelineDesc& desc) override {
+            return CreateRef<OpenGLPipeline>(desc);
+        }
 
-        void setViewport(const Viewport& vp) override;
-        void setScissor(const ScissorRect& rect) override;
-        void clear(float r, float g, float b, float a, float depth = 1.0f) override;
-        void draw(uint32_t vertexCount, uint32_t firstVertex = 0) override;
-        void drawIndexed(uint32_t indexCount, uint32_t firstIndex = 0) override;
+        void setViewport(const Viewport&) override {}
+        void setScissor(const ScissorRect&) override {}
+        void clear(float, float, float, float, float = 1.0f) override {}
+        void draw(uint32_t, uint32_t = 0) override {}
+        void drawIndexed(uint32_t, uint32_t = 0) override {}
 
-        std::string getBackendName() const override { return "OpenGL"; }
+        std::string getBackendName() const override { return "Stub (Vulkan-only build)"; }
     };
 
 }} // namespace GameEngine::RHI

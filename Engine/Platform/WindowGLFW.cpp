@@ -2,7 +2,6 @@
 #include "../Core/Logger.hpp"
 #include "../Core/Events/WindowEvents.hpp"
 #include "../Core/Events/InputEvents.hpp"
-#include <glad/glad.h>
 #include <stdexcept>
 
 namespace GameEngine {
@@ -31,9 +30,9 @@ namespace GameEngine {
         m_Data.Width = props.Width;
         m_Data.Height = props.Height;
         m_Data.VSync = props.VSync;
-        
+
         GE_CORE_INFO("Creating window {0} ({1}, {2})", props.Title, props.Width, props.Height);
-        
+
         // Initialize GLFW
         if (!s_GLFWInitialized) {
             int success = glfwInit();
@@ -44,20 +43,11 @@ namespace GameEngine {
             glfwSetErrorCallback(GLFWErrorCallback);
             s_GLFWInitialized = true;
         }
-        
-        // Configure GLFW
-        // Using OpenGL 4.2 for WSL compatibility (WSLg Mesa D3D12 backend limit)
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        
-        #ifdef __APPLE__
-            glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-        #endif
-        
-        // Enable MSAA
-        glfwWindowHint(GLFW_SAMPLES, 4);
-        
+
+        // Tell GLFW not to create an OpenGL context
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
         // Create window
         m_Window = glfwCreateWindow(
             static_cast<int>(props.Width),
@@ -66,42 +56,24 @@ namespace GameEngine {
             nullptr,
             nullptr
         );
-        
+
         if (!m_Window) {
             GE_CORE_ERROR("Failed to create GLFW window!");
             throw std::runtime_error("Failed to create GLFW window!");
         }
         s_GLFWWindowCount++;
 
-        // Make OpenGL context current
-        glfwMakeContextCurrent(m_Window);
-
-        // Load OpenGL function pointers with GLAD
-        int gladStatus = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
-        if (!gladStatus) {
-            GE_CORE_ERROR("Failed to initialize GLAD!");
-            glfwDestroyWindow(m_Window);
-            m_Window = nullptr;
-            s_GLFWWindowCount--;
-            if (s_GLFWWindowCount <= 0) {
-                s_GLFWWindowCount = 0;
-                glfwTerminate();
-                s_GLFWInitialized = false;
-            }
-            throw std::runtime_error("Failed to initialize GLAD!");
+        // Check Vulkan support
+        if (!glfwVulkanSupported()) {
+            GE_CORE_ERROR("Vulkan is not supported on this system!");
+            throw std::runtime_error("Vulkan is not supported!");
         }
-        
-        GE_CORE_INFO("OpenGL Info:");
-        GE_CORE_INFO("  Vendor:   {0}", (const char*)glGetString(GL_VENDOR));
-        GE_CORE_INFO("  Renderer: {0}", (const char*)glGetString(GL_RENDERER));
-        GE_CORE_INFO("  Version:  {0}", (const char*)glGetString(GL_VERSION));
-        
+
+        GE_CORE_INFO("Vulkan window created successfully");
+
         // Set user pointer for callbacks
         glfwSetWindowUserPointer(m_Window, &m_Data);
-        
-        // Enable VSync
-        SetVSync(props.VSync);
-        
+
         // Setup GLFW callbacks
         SetupCallbacks();
     }
@@ -124,15 +96,14 @@ namespace GameEngine {
     }
 
     void WindowGLFW::SwapBuffers() {
-        glfwSwapBuffers(m_Window);
+        // Vulkan uses swapchain presentation, not glfwSwapBuffers
+        // This is now a no-op; presentation is handled by VulkanSwapchain
     }
 
     void WindowGLFW::SetVSync(bool enabled) {
-        if (enabled)
-            glfwSwapInterval(1);
-        else
-            glfwSwapInterval(0);
-        
+        // VSync in Vulkan is controlled via swapchain present mode
+        // (FIFO = vsync on, MAILBOX/IMMEDIATE = vsync off)
+        // Store the preference; swapchain recreation will pick it up
         m_Data.VSync = enabled;
     }
 
@@ -154,81 +125,104 @@ namespace GameEngine {
         }
 
         m_Data.Fullscreen = fullscreen;
+        m_Data.FramebufferResized = true;
+    }
+
+    void WindowGLFW::CreateVulkanSurface(VkInstance instance) {
+        if (glfwCreateWindowSurface(instance, m_Window, nullptr, &m_Surface) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create Vulkan window surface!");
+        }
+        GE_CORE_INFO("Vulkan surface created");
+    }
+
+    void WindowGLFW::DestroyVulkanSurface(VkInstance instance) {
+        if (m_Surface != VK_NULL_HANDLE) {
+            vkDestroySurfaceKHR(instance, m_Surface, nullptr);
+            m_Surface = VK_NULL_HANDLE;
+        }
     }
 
     void WindowGLFW::SetupCallbacks() {
+        // Framebuffer resize callback
+        glfwSetFramebufferSizeCallback(m_Window, [](GLFWwindow* window, int width, int height) {
+            WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
+            data.FramebufferResized = true;
+            data.Width = static_cast<uint32_t>(width);
+            data.Height = static_cast<uint32_t>(height);
+        });
+
         // Window resize callback
         glfwSetWindowSizeCallback(m_Window, [](GLFWwindow* window, int width, int height) {
             WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
             data.Width = width;
             data.Height = height;
-            
+
             WindowResizeEvent event(width, height);
-            data.EventCallback(event);
+            if (data.EventCallback) data.EventCallback(event);
         });
-        
+
         // Window close callback
         glfwSetWindowCloseCallback(m_Window, [](GLFWwindow* window) {
             WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
             WindowCloseEvent event;
-            data.EventCallback(event);
+            if (data.EventCallback) data.EventCallback(event);
         });
-        
+
         // Key callback
         glfwSetKeyCallback(m_Window, [](GLFWwindow* window, int key, int scancode, int action, int mods) {
+            (void)scancode; (void)mods;
             WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
-            
+
             switch (action) {
                 case GLFW_PRESS: {
                     KeyPressedEvent event(key, 0);
-                    data.EventCallback(event);
+                    if (data.EventCallback) data.EventCallback(event);
                     break;
                 }
                 case GLFW_RELEASE: {
                     KeyReleasedEvent event(key);
-                    data.EventCallback(event);
+                    if (data.EventCallback) data.EventCallback(event);
                     break;
                 }
                 case GLFW_REPEAT: {
                     KeyPressedEvent event(key, 1);
-                    data.EventCallback(event);
+                    if (data.EventCallback) data.EventCallback(event);
                     break;
                 }
             }
         });
-        
+
         // Mouse button callback
         glfwSetMouseButtonCallback(m_Window, [](GLFWwindow* window, int button, int action, int mods) {
+            (void)mods;
             WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
-            
+
             switch (action) {
                 case GLFW_PRESS: {
                     MouseButtonPressedEvent event(button);
-                    data.EventCallback(event);
+                    if (data.EventCallback) data.EventCallback(event);
                     break;
                 }
                 case GLFW_RELEASE: {
                     MouseButtonReleasedEvent event(button);
-                    data.EventCallback(event);
+                    if (data.EventCallback) data.EventCallback(event);
                     break;
                 }
             }
         });
-        
+
         // Mouse scroll callback
         glfwSetScrollCallback(m_Window, [](GLFWwindow* window, double xOffset, double yOffset) {
             WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
-            
             MouseScrolledEvent event(static_cast<float>(xOffset), static_cast<float>(yOffset));
-            data.EventCallback(event);
+            if (data.EventCallback) data.EventCallback(event);
         });
-        
+
         // Mouse move callback
         glfwSetCursorPosCallback(m_Window, [](GLFWwindow* window, double xPos, double yPos) {
             WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
-            
             MouseMovedEvent event(static_cast<float>(xPos), static_cast<float>(yPos));
-            data.EventCallback(event);
+            if (data.EventCallback) data.EventCallback(event);
         });
     }
 }

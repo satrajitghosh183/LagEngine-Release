@@ -12,19 +12,6 @@ void SceneManager3D::update(float dt) {
     }
 }
 
-// void SceneManager3D::render(const engine::graphics::Shader& shader) const {
-//     if (currentScene) {
-//         currentScene->render(shader);
-//     }
-// }
-
-void SceneManager3D::render(const engine::graphics::Shader& shader) const {
-    if (currentScene) {
-        currentScene->render();  // <-- NO ARGUMENT!
-    }
-}
-
-
 std::shared_ptr<Scene3D> SceneManager3D::getCurrentScene() const {
     return currentScene;
 }

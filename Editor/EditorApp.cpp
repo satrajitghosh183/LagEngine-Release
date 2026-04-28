@@ -56,8 +56,9 @@ namespace GameEngine {
         // Initialize UI renderer
         UIRenderer::Init();
 
-        // Initialize debug drawing system
-        DebugDraw::Init();
+        // Debug drawing now requires a Vulkan render pass; the editor wires
+        // it up later from the active render path. Skip the no-op default
+        // init here to avoid the legacy GL-style call.
 
         // Create editor context
         m_EditorContext = CreateScope<EditorContext>();
@@ -447,7 +448,7 @@ void main() {
             GE_CORE_WARN("External PBR shader not found, using fallback inline shader");
         }
 
-        m_DefaultMaterial = CreateRef<Material>(m_DefaultShader);
+        m_DefaultMaterial = CreateRef<Material>();
         m_DefaultMaterial->SetName("Default");
         m_DefaultMaterial->SetAlbedo(glm::vec3(0.8f, 0.8f, 0.8f));
         m_DefaultMaterial->SetRoughness(0.5f);
@@ -480,14 +481,10 @@ void main() {
     }
 
     void EditorApp::PostLoadFixupMaterials(const Ref<Scene>& scene) {
-        auto entities = scene->GetEntitiesWith<MeshRendererComponent>();
-        for (auto& entity : entities) {
-            auto& meshRenderer = entity.GetComponent<MeshRendererComponent>();
-            auto material = meshRenderer.GetMaterial();
-            if (material && !material->GetShader() && m_DefaultShader) {
-                material->SetShader(m_DefaultShader);
-            }
-        }
+        // Vulkan materials carry pipeline references — there's no Shader
+        // object to fix up post-load. The renderer assigns the default
+        // pipeline at draw time when a material has none set.
+        (void)scene;
     }
 
     Entity EditorApp::CreateDefaultMeshEntity(const std::string& name, const Ref<Mesh3D>& mesh) {
@@ -527,9 +524,6 @@ void main() {
 
                 auto material = (!result.Materials.empty() && result.Materials[0])
                     ? result.Materials[0] : m_DefaultMaterial;
-                if (material && !material->GetShader() && m_DefaultShader) {
-                    material->SetShader(m_DefaultShader);
-                }
 
                 Entity entity = currentScene->CreateEntity(entityName);
                 // TransformComponent already added by CreateEntity

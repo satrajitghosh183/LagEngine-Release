@@ -193,6 +193,9 @@ namespace UI {
         void setReferenceResolution(float w, float h) { m_RefWidth = w; m_RefHeight = h; }
         glm::vec2 screenToCanvas(const glm::vec2& screenPos) const;
 
+        // Access to root widgets (used by UISystem for rendering)
+        const std::vector<Ref<UIWidget>>& GetRoots() const { return m_RootWidgets; }
+
         // World-space canvas mode
         bool WorldSpace = false;
         glm::mat4 WorldTransform = glm::mat4(1.0f);

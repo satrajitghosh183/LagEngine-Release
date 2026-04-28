@@ -2,8 +2,7 @@
 #include <iostream>
 #include <chrono>
 
-#define GLEW_STATIC
-#include "GL/glew.h"
+#define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
 #include "Eigen/Dense"
 
@@ -15,11 +14,6 @@ inline uint64_t currentTimeMillis() {
 inline uint64_t currentTimeMicros() {
 	return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::
 		now().time_since_epoch()).count();
-}
-
-inline void checkGlErrors() {
-	GLenum err;
-	while ((err = glGetError()) != GL_NO_ERROR) { std::cerr << err << std::endl; abort(); };
 }
 
 // http://stackoverflow.com/questions/2270726/how-to-determine-the-size-of-an-array-of-strings-in-c

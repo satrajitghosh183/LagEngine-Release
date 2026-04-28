@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ── SpringBlockSim Build Script (Linux / macOS / WSL) ─────────────────────────
-#  Requires: CMake, C++17 compiler (g++/clang), OpenGL, GLFW (e.g. libglfw3-dev)
+# ── SpringBlockSim Build Script (Vulkan) ─────────────────────────────────────
+#  Requires: CMake 3.20+, C++17 compiler, Vulkan SDK (with shaderc), GLFW
 #  Usage:   ./build_sim.sh [Release|Debug]
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -20,8 +20,7 @@ echo
 echo "[SpringBlockSim] Build succeeded."
 if [[ -f "SpringBlockSim" ]]; then
   echo "  Executable: build/SpringBlockSim"
-  echo "  Run from SpringBlockSim folder so relative shader paths resolve:"
-  echo "    ./build/SpringBlockSim"
+  echo "  Run:  ./build/SpringBlockSim"
 else
   echo "  Executable: build/$CONFIG/SpringBlockSim (multi-config generator)"
 fi

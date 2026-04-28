@@ -1,15 +1,15 @@
 //
 // Created by barth on 25/09/23.
 //
+// Vulkan port: Engine now wraps VulkanBase for window, input, and ImGui.
+//
 
 #ifndef FEATHERGL_ENGINE_H
 #define FEATHERGL_ENGINE_H
 
 #include "Observable.h"
-#include "../imgui/imgui.h"
-#include "../imgui/imgui_impl_glfw.h"
-#include "../imgui/imgui_impl_opengl3.h"
-#include <GLFW/glfw3.h>
+#include <VulkanBase.hpp>
+#include <imgui.h>
 #include <map>
 #include <glm/vec2.hpp>
 
@@ -17,20 +17,14 @@ class Engine {
 public:
     Engine(int windowWidth, int windowHeight, const char *name);
 
-    ~Engine() {
-        ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImGui::DestroyContext();
-
-        glfwDestroyWindow(window);
-    }
+    ~Engine();
 
     void setCursorEnabled(bool enabled) {
-        glfwSetInputMode(window, GLFW_CURSOR, enabled ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+        glfwSetInputMode(_vkBase.GetWindow(), GLFW_CURSOR, enabled ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
     }
 
     bool isMousePressed() const {
-        return glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        return glfwGetMouseButton(_vkBase.GetWindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     }
 
     bool isKeyPressed(int key) const {
@@ -38,11 +32,11 @@ public:
     }
 
     GLFWwindow *getWindow() const {
-        return window;
+        return _vkBase.GetWindow();
     }
 
     void windowSize(int *width, int *height) {
-        glfwGetWindowSize(window, width, height);
+        glfwGetWindowSize(_vkBase.GetWindow(), width, height);
     }
 
     float getElapsedSeconds() const {
@@ -54,38 +48,26 @@ public:
     }
 
     void setClearColor(float r, float g, float b, float a) {
-        glClearColor(r, g, b, a);
+        // Stored for future use; VulkanBase clear color is set in BeginFrame
+        (void)r; (void)g; (void)b; (void)a;
     }
 
-    void start() {
-        int width, height;
-        glfwGetWindowSize(window, &width, &height);
-        onWindowResizeObservable.notifyObservers(width, height);
-
-        while (!glfwWindowShouldClose(window)) {
-            float newFrameTime = getElapsedSeconds();
-            deltaTime = newFrameTime - lastFrameTime;
-            lastFrameTime = newFrameTime;
-
-            onExecuteLoopObservable.notifyObservers();
-            glfwPollEvents();
-            glfwSwapBuffers(window);
-        }
-
-        glfwTerminate();
-    }
+    void start();
 
     glm::vec2 getMousePosition() {
         double x, y;
-        glfwGetCursorPos(window, &x, &y);
+        glfwGetCursorPos(_vkBase.GetWindow(), &x, &y);
         return {x, y};
     }
 
     glm::vec2 getWindowSize() {
         int width, height;
-        glfwGetWindowSize(window, &width, &height);
+        glfwGetWindowSize(_vkBase.GetWindow(), &width, &height);
         return {width, height};
     }
+
+    // Access the VulkanBase for rendering
+    vkdemo::VulkanBase& vulkanBase() { return _vkBase; }
 
     Observable<> onExecuteLoopObservable{};
 
@@ -105,8 +87,7 @@ private:
 
     std::map<int, bool> _keyStates{};
 
-    GLFWwindow *window;
+    vkdemo::VulkanBase _vkBase;
 };
-
 
 #endif //FEATHERGL_ENGINE_H

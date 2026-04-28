@@ -1,50 +1,48 @@
 #ifndef FEATHERGL_POSTPROCESSING_H
 #define FEATHERGL_POSTPROCESSING_H
 
-#include "glad/glad.h"
-
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <iostream>
 #include <memory>
-#include "utils.h"
 #include "Shader.h"
 #include "Engine.h"
-#include "ScreenQuad.h"
+#include "Observable.h"
+
+// Vulkan port: PostProcessing is a stub. Full-screen post-processing
+// requires additional Vulkan render passes and framebuffer attachments.
+// The API is retained so the rest of the code compiles.
 
 class PostProcessing {
-private:
-    int _width{}, _height{};
-
-    std::shared_ptr<ScreenQuad> screenQuad;
-
-    unsigned int FBO{};
-    unsigned int RBO{};
-
-    std::shared_ptr<Texture> _inputTexture{};
-
-    std::shared_ptr<Shader> _shader;
-
-    GLuint uniformScreenResolution;
 public:
-    explicit PostProcessing(const char *shaderFolder, Engine *engine);
+    explicit PostProcessing(const char *shaderFolder, Engine *engine) {
+        _shader = std::make_shared<Shader>(shaderFolder);
+    }
 
-    void RenderTo(unsigned int targetFrameBuffer);
+    void RenderTo(unsigned int targetFrameBuffer) {
+        // No-op in Vulkan port
+        (void)targetFrameBuffer;
+    }
 
     void RenderToScreen() {
-        RenderTo(0);
+        // No-op
     }
 
     void setFBO(unsigned int FBO) {
-        this->FBO = FBO;
+        // No-op
+        (void)FBO;
     }
 
     unsigned int getFBO() const {
-        return FBO;
+        return 0;
     }
 
-    void resize(int width, int height);
+    void resize(int width, int height) {
+        // No-op
+        (void)width;
+        (void)height;
+    }
 
     std::shared_ptr<Shader> shader() {
         return _shader;
@@ -53,6 +51,9 @@ public:
     Observable<> onBeforeRenderObservable;
 
     ~PostProcessing() = default;
+
+private:
+    std::shared_ptr<Shader> _shader;
 };
 
 #endif //FEATHERGL_POSTPROCESSING_H

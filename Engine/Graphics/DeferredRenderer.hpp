@@ -2,38 +2,60 @@
 
 #include "../Core/Base.hpp"
 #include "GBuffer.hpp"
-#include "SSAO.hpp"
 #include "Shader.hpp"
+#include "VertexArray.hpp"
+#include "Vulkan/VulkanPipeline.hpp"
+#include "Vulkan/VulkanDescriptors.hpp"
+#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 
 namespace GameEngine {
 
+    /**
+     * @brief Vulkan deferred renderer
+     *
+     * Two-pass rendering:
+     *   1. Geometry pass: render scene into G-Buffer (position, normal, albedo, PBR params)
+     *   2. Lighting pass: read G-Buffer as input, compute lighting per-pixel
+     *
+     * G-Buffer attachments are sampled as textures in the lighting pass
+     * via descriptor sets (more efficient than OpenGL texture binding).
+     */
     class DeferredRenderer {
     public:
         void Init(int width, int height);
         void Resize(int width, int height);
         void Shutdown();
 
-        void BeginGeometryPass();
-        void EndGeometryPass();
-        void RenderLightingPass(const glm::mat4& projection, const glm::vec3& cameraPos);
+        /**
+         * @brief Begin geometry pass (starts G-Buffer render pass)
+         */
+        void BeginGeometryPass(VkCommandBuffer cmd);
 
-        Ref<Shader> GetGeometryShader() { return m_GeometryShader; }
+        /**
+         * @brief End geometry pass
+         */
+        void EndGeometryPass(VkCommandBuffer cmd);
+
+        /**
+         * @brief Render lighting pass (reads G-Buffer, outputs to current render pass)
+         */
+        void RenderLightingPass(VkCommandBuffer cmd, const glm::mat4& projection,
+                                 const glm::vec3& cameraPos);
+
         GBuffer& GetGBuffer() { return m_GBuffer; }
-        SSAO& GetSSAO() { return m_SSAO; }
 
         bool SSAOEnabled = true;
 
     private:
         void CreateFullscreenQuad();
-        void RenderFullscreenQuad();
 
         GBuffer m_GBuffer;
-        SSAO m_SSAO;
-        Ref<Shader> m_GeometryShader;
-        Ref<Shader> m_LightingShader;
 
-        uint32_t m_QuadVAO = 0, m_QuadVBO = 0;
+        // Fullscreen quad for lighting pass
+        Ref<VertexBuffer> m_QuadVB;
+        Ref<IndexBuffer> m_QuadIB;
+
         int m_Width = 0, m_Height = 0;
     };
 

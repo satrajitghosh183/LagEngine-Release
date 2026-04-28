@@ -1,7 +1,7 @@
 #pragma once
-#include <glad/glad.h>
 #include <vector>
-#include "Shader.h"
+#include <VulkanBase.hpp>
+#include <glm/glm.hpp>
 #include "SpringMesh.h"
 #include "Physics.h"
 #include "Camera.h"
@@ -18,68 +18,63 @@ class Renderer {
 public:
     RenderConfig cfg;
 
-    void init(int width, int height);
+    void init(vkdemo::VulkanBase* vkBase);
     void resize(int width, int height);
-    void render(const PhysicsWorld& world, const Camera& cam,
+    void render(VkCommandBuffer cmd, const PhysicsWorld& world, const Camera& cam,
                 int selectedBlock, int selectedSpring);
     void shutdown();
 
 private:
+    vkdemo::VulkanBase* m_vkBase = nullptr;
     int m_w = 0, m_h = 0;
 
-    // ── Shaders ───────────────────────────────────────────────────────────────
-    Shader m_pbrShader;
-    Shader m_groundShader;
-    Shader m_shadowShader;
-    Shader m_bloomExtractShader;
-    Shader m_blurShader;
-    Shader m_tonemapShader;
+    // ── Push constant structures ─────────────────────────────────────────────
+    // PBR push constants: MVP + model + material params
+    struct PBRPushConstants {
+        glm::mat4 mvp;          // 0
+        glm::mat4 model;        // 64
+        glm::vec4 albedo;       // 128  (xyz = albedo, w = ao)
+        glm::vec4 params;       // 144  (x = metallic, y = roughness, z = selectedBrightness, w = unused)
+        glm::vec4 camPos;       // 160  (xyz = camera position)
+        glm::vec4 lightDir;     // 176  (xyz = light direction)
+        glm::vec4 lightColor;   // 192  (xyz = light color)
+    };  // 208 bytes total
 
-    // ── Shadow map ────────────────────────────────────────────────────────────
-    GLuint m_shadowFBO  = 0;
-    GLuint m_shadowTex  = 0;
-    static constexpr int SHADOW_RES = 2048;
+    // Ground push constants (same layout, reuse PBR struct)
 
-    // ── HDR colour buffer ─────────────────────────────────────────────────────
-    GLuint m_hdrFBO     = 0;
-    GLuint m_hdrColor   = 0;   // float texture
-    GLuint m_hdrDepth   = 0;
+    // ── Pipelines ────────────────────────────────────────────────────────────
+    VkPipelineLayout m_pbrPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline       m_pbrPipeline       = VK_NULL_HANDLE;
+    VkPipeline       m_pbrWireframePipeline = VK_NULL_HANDLE;
+    VkPipeline       m_groundPipeline    = VK_NULL_HANDLE;
 
-    // ── Bloom ping-pong ───────────────────────────────────────────────────────
-    GLuint m_bloomFBO[2]   = {};
-    GLuint m_bloomTex[2]   = {};
-
-    // ── Geometry ──────────────────────────────────────────────────────────────
-    GLuint m_cubeVAO = 0, m_cubeVBO = 0, m_cubeEBO = 0;
-    GLuint m_groundVAO = 0, m_groundVBO = 0, m_groundEBO = 0;
-    GLuint m_quadVAO  = 0, m_quadVBO  = 0;
+    // ── Geometry buffers ─────────────────────────────────────────────────────
+    vkdemo::GPUBuffer m_cubeVertexBuffer{};
+    vkdemo::GPUBuffer m_cubeIndexBuffer{};
+    vkdemo::GPUBuffer m_groundVertexBuffer{};
+    vkdemo::GPUBuffer m_groundIndexBuffer{};
 
     // Spring meshes (one per spring, updated each frame)
     std::vector<SpringMesh> m_springMeshes;
 
-    // ── Light ─────────────────────────────────────────────────────────────────
-    glm::vec3 m_lightDir  = glm::normalize(glm::vec3(-1.0f, -2.0f, -1.5f));
+    // ── Light ────────────────────────────────────────────────────────────────
+    glm::vec3 m_lightDir   = glm::normalize(glm::vec3(-1.0f, -2.0f, -1.5f));
     glm::vec3 m_lightColor = {6.0f, 5.8f, 5.5f};
 
-    glm::mat4 m_lightSpaceMatrix;
+    // ── Private helpers ──────────────────────────────────────────────────────
+    void createPipelines();
+    void initCubeBuffers();
+    void initGroundBuffers();
 
-    // ── Private helpers ───────────────────────────────────────────────────────
-    void initShadowMap();
-    void initHDRBuffer();
-    void initBloomBuffers();
-    void initCubeMesh();
-    void initGroundMesh();
-    void initQuad();
+    void drawBlocks(VkCommandBuffer cmd, const PhysicsWorld& world,
+                    const Camera& cam, int selBlock);
+    void drawSprings(VkCommandBuffer cmd, const PhysicsWorld& world,
+                     const Camera& cam, int selSpring);
+    void drawGround(VkCommandBuffer cmd, const Camera& cam);
 
-    void shadowPass(const PhysicsWorld& world);
-    void colorPass (const PhysicsWorld& world, const Camera& cam,
-                    int selBlock, int selSpring);
-    void bloomPass ();
-    void tonemapPass();
-
-    void drawBlock (const Block& b, bool selected);
     void resizeSpringMeshes(int n);
 
-    // Set PBR common uniforms
-    void bindPBRCommon(Shader& sh, const Camera& cam);
+    // Shader compilation
+    VkShaderModule compileGLSL(const std::string& source, const std::string& name,
+                               bool isVertex);
 };

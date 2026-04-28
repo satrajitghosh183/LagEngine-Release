@@ -1,130 +1,128 @@
 #pragma once
 
 #include "../Core/Base.hpp"
-#include "Shader.hpp"
-#include "FrameBuffer.hpp"
-#include "Light.hpp"
+#include "Vulkan/VulkanDescriptors.hpp"
+#include "Vulkan/VulkanPipeline.hpp"
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
+#include <vector>
+#include <functional>
+#include <memory>
 
 namespace GameEngine {
 
     /**
-     * @brief Shadow map for a single light source
-     * 
-     * Supports directional, point, and spot light shadows.
-     * Uses depth-only framebuffer for shadow mapping.
+     * @brief Shadow map for a single light source (Vulkan)
+     *
+     * Owns a depth-only VkRenderPass + VkFramebuffer backed by a
+     * VK_FORMAT_D32_SFLOAT VkImage. The depth image is left in
+     * VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL after End() so it
+     * can immediately be sampled in the lighting pass.
+     *
+     * Usage:
+     *   shadowMap.Begin(cmd);
+     *   // record depth-only draw calls ...
+     *   shadowMap.End(cmd);
+     *   // bind shadowMap.GetDepthDescriptorInfo() to lighting descriptor set
      */
     class ShadowMap {
     public:
-        /**
-         * @brief Create shadow map
-         * @param resolution Texture resolution (width and height)
-         */
-        ShadowMap(uint32_t resolution = 1024);
+        explicit ShadowMap(uint32_t resolution = 1024);
         ~ShadowMap();
-        
-        /**
-         * @brief Begin shadow map rendering
-         * Call this before rendering shadow casters
-         */
-        void Begin();
-        
-        /**
-         * @brief End shadow map rendering
-         */
-        void End();
-        
-        /**
-         * @brief Bind shadow map texture for sampling
-         * @param slot Texture slot
-         */
-        void BindTexture(uint32_t slot = 0) const;
-        
-        /**
-         * @brief Get light space matrix for directional light
-         */
-        glm::mat4 CalculateDirectionalLightMatrix(
-            const glm::vec3& lightDirection,
-            const glm::vec3& sceneCenter,
-            float sceneRadius
-        ) const;
+
+        ShadowMap(const ShadowMap&)            = delete;
+        ShadowMap& operator=(const ShadowMap&) = delete;
 
         /**
-         * @brief Get light space matrix for spot light
+         * @brief Begin depth-only render pass.
+         *        Transitions depth image to DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+         *        sets the viewport/scissor to m_Resolution x m_Resolution,
+         *        and clears the depth buffer.
          */
-        glm::mat4 CalculateSpotLightMatrix(
-            const glm::vec3& lightPosition,
-            const glm::vec3& lightDirection,
-            float outerConeAngle,
-            float nearPlane = 0.1f,
-            float farPlane = 100.0f
-        ) const;
-        
+        void Begin(VkCommandBuffer cmd);
+
         /**
-         * @brief Get resolution
+         * @brief End render pass and transition depth image to READ_ONLY layout
+         *        so it can be sampled in the lighting pass.
          */
-        uint32_t GetResolution() const { return m_Resolution; }
-        
+        void End(VkCommandBuffer cmd);
+
         /**
-         * @brief Get depth texture ID
+         * @brief Descriptor image info for binding depth texture to lighting pass.
+         *        Layout is VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL.
          */
-        uint32_t GetDepthTextureID() const { return m_DepthTexture; }
-        
-        /**
-         * @brief Get shadow depth shader
-         */
-        static Ref<Shader> GetDepthShader();
-        
-        /**
-         * @brief Get the current light space matrix (set after Begin)
-         */
+        VkDescriptorImageInfo GetDepthDescriptorInfo() const;
+
+        VkImageView GetDepthView()  const { return m_DepthView;  }
+        VkImage     GetDepthImage() const { return m_DepthImage; }
+        uint32_t    GetResolution() const { return m_Resolution; }
+
         const glm::mat4& GetLightSpaceMatrix() const { return m_LightSpaceMatrix; }
-        void SetLightSpaceMatrix(const glm::mat4& matrix) { m_LightSpaceMatrix = matrix; }
-        
+        void SetLightSpaceMatrix(const glm::mat4& m) { m_LightSpaceMatrix = m; }
+
+        /** @brief Compute an orthographic light-space matrix for a directional light. */
+        glm::mat4 CalculateDirectionalLightMatrix(const glm::vec3& lightDirection,
+                                                   const glm::vec3& sceneCenter,
+                                                   float sceneRadius) const;
+
+        /** @brief Compute a perspective light-space matrix for a spot light. */
+        glm::mat4 CalculateSpotLightMatrix(const glm::vec3& lightPosition,
+                                            const glm::vec3& lightDirection,
+                                            float outerConeAngle,
+                                            float nearPlane = 0.1f,
+                                            float farPlane  = 100.0f) const;
+
+        VkRenderPass GetRenderPass() const { return m_RenderPass; }
+
     private:
+        void CreateDepthResources();
+        void CreateRenderPass();
+        void CreateFramebuffer();
+        void CreateSampler();
+
         uint32_t m_Resolution;
-        uint32_t m_FBO = 0;
-        uint32_t m_DepthTexture = 0;
-        
+
+        VkImage       m_DepthImage = VK_NULL_HANDLE;
+        VmaAllocation m_DepthAlloc = VK_NULL_HANDLE;
+        VkImageView   m_DepthView  = VK_NULL_HANDLE;
+        VkSampler     m_Sampler    = VK_NULL_HANDLE;
+
+        VkRenderPass  m_RenderPass  = VK_NULL_HANDLE;
+        VkFramebuffer m_Framebuffer = VK_NULL_HANDLE;
+
         glm::mat4 m_LightSpaceMatrix = glm::mat4(1.0f);
-        
-        int m_PreviousViewport[4] = {0, 0, 0, 0};
-        
-        // Shared depth-only shader
-        static Ref<Shader> s_DepthShader;
     };
 
+    // -------------------------------------------------------------------------
+
     /**
-     * @brief Manages all shadow maps in the scene
+     * @brief Manages all shadow maps for a scene (Vulkan)
+     *
+     * Holds one ShadowMap per shadow-casting light and provides
+     * helpers to build the light-space matrices and bind the depth images
+     * to descriptor sets for the lighting pass.
      */
     class ShadowMapManager {
     public:
-        ShadowMapManager(int maxShadowCastingLights = 4);
+        explicit ShadowMapManager(int maxShadowCastingLights = 4);
         ~ShadowMapManager() = default;
-        
+
         /**
-         * @brief Prepare shadow maps for rendering
-         */
-        void BeginShadowPass();
-        
-        /**
-         * @brief Finish shadow pass
-         */
-        void EndShadowPass();
-        
-        /**
-         * @brief Render shadow map for a directional light
+         * @brief Render shadow map for a directional light.
+         * @param renderCallback Called with the light-space matrix; caller
+         *        should record depth-only draw calls inside the callback.
          */
         void RenderDirectionalShadow(
             int lightIndex,
             const glm::vec3& direction,
             const glm::vec3& sceneCenter,
             float sceneRadius,
-            const std::function<void(const glm::mat4& lightSpaceMatrix)>& renderCallback
-        );
-        
+            VkCommandBuffer cmd,
+            const std::function<void(VkCommandBuffer, const glm::mat4&)>& renderCallback);
+
         /**
-         * @brief Render shadow map for a spot light
+         * @brief Render shadow map for a spot light.
          */
         void RenderSpotShadow(
             int lightIndex,
@@ -132,35 +130,24 @@ namespace GameEngine {
             const glm::vec3& direction,
             float outerConeAngle,
             float range,
-            const std::function<void(const glm::mat4& lightSpaceMatrix)>& renderCallback
-        );
-        
+            VkCommandBuffer cmd,
+            const std::function<void(VkCommandBuffer, const glm::mat4&)>& renderCallback);
+
         /**
-         * @brief Bind shadow maps for sampling
-         * @param startSlot First texture slot to use
+         * @brief Returns VkDescriptorImageInfo array for all shadow maps.
+         *        Use this to fill an array descriptor in the lighting pass.
          */
-        void BindShadowMaps(uint32_t startSlot = 4) const;
-        
-        /**
-         * @brief Get light space matrices for shader
-         */
+        std::vector<VkDescriptorImageInfo> GetShadowMapDescriptors() const;
+
         const std::vector<glm::mat4>& GetLightSpaceMatrices() const { return m_LightSpaceMatrices; }
-        
-        /**
-         * @brief Get shadow map at index
-         */
+
         ShadowMap* GetShadowMap(int index);
-        
-        /**
-         * @brief Set shadow map resolution
-         */
         void SetResolution(uint32_t resolution);
-        
+
     private:
         std::vector<Scope<ShadowMap>> m_ShadowMaps;
-        std::vector<glm::mat4> m_LightSpaceMatrices;
-        int m_MaxLights;
-        int m_CurrentViewport[4];
+        std::vector<glm::mat4>        m_LightSpaceMatrices;
+        int                           m_MaxLights;
     };
 
-}
+} // namespace GameEngine

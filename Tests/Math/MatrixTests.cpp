@@ -179,14 +179,15 @@ TEST(Mat4Test, Perspective) {
     float far = 100.0f;
     
     glm::mat4 proj = glm::perspective(fov, aspect, near, far);
-    
-    // Test that near plane maps correctly
+
+    // Vulkan NDC depth is [0, 1] (GLM_FORCE_DEPTH_ZERO_TO_ONE):
+    //   near plane → z = 0
+    //   far plane  → z = 1
     glm::vec4 nearPoint(0.0f, 0.0f, -near, 1.0f);
     glm::vec4 projNear = proj * nearPoint;
     projNear /= projNear.w;
-    EXPECT_NEAR(projNear.z, -1.0f, EPSILON);
-    
-    // Test that far plane maps correctly
+    EXPECT_NEAR(projNear.z, 0.0f, EPSILON);
+
     glm::vec4 farPoint(0.0f, 0.0f, -far, 1.0f);
     glm::vec4 projFar = proj * farPoint;
     projFar /= projFar.w;
@@ -197,15 +198,16 @@ TEST(Mat4Test, Orthographic) {
     float left = -10.0f, right = 10.0f;
     float bottom = -10.0f, top = 10.0f;
     float near = -1.0f, far = 1.0f;
-    
+
     glm::mat4 ortho = glm::ortho(left, right, bottom, top, near, far);
-    
-    // Center should map to origin
+
+    // Center should map to (0, 0). Vulkan depth is [0, 1] so z = 0 here
+    // corresponds to the midpoint between near and far → z = 0.5.
     glm::vec4 center(0.0f, 0.0f, 0.0f, 1.0f);
     glm::vec4 projCenter = ortho * center;
     EXPECT_NEAR(projCenter.x, 0.0f, EPSILON);
     EXPECT_NEAR(projCenter.y, 0.0f, EPSILON);
-    EXPECT_NEAR(projCenter.z, 0.0f, EPSILON);
+    EXPECT_NEAR(projCenter.z, 0.5f, EPSILON);
 }
 
 // ==================== Transform Composition ====================

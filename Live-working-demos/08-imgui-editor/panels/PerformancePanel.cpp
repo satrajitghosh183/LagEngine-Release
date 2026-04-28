@@ -278,10 +278,10 @@ void PerformancePanel::renderSystemInfo() {
     
     if (ImGui::CollapsingHeader("GPU Info", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent();
-        ImGui::TextWrapped("Renderer: OpenGL 4.3");
-        ImGui::TextWrapped("Vendor: NVIDIA Corporation");
-        ImGui::TextWrapped("Device: NVIDIA GeForce RTX 3080");
-        ImGui::TextWrapped("GLSL Version: 4.30");
+        ImGui::TextWrapped("Renderer: Vulkan 1.2");
+        ImGui::TextWrapped("Vendor: GPU Vendor");
+        ImGui::TextWrapped("Device: Vulkan GPU");
+        ImGui::TextWrapped("SPIR-V Shaders");
         ImGui::Unindent();
     }
     

@@ -1,5 +1,5 @@
 #pragma once
-#include <SFML/Graphics.hpp>
+#include <glm/glm.hpp>
 #include <vector>
 #include "engine/scene/Object2D.hpp"
 #include "engine/physics/Particle.hpp"
@@ -16,17 +16,18 @@ namespace engine::objects {
         std::vector<physics::Particle> particles;
         std::vector<physics::Constraint2D> constraints;
 
-        Cloth2D(int w, int h, float s, const sf::Vector2f& origin);
+        Cloth2D(int w, int h, float s, const glm::vec2& origin);
 
         void update(float dt) override;
-        void render(sf::RenderWindow& window) override;
 
-        void update(float dt, const sf::Vector2f& gravity, int iterations);
+        void update(float dt, const glm::vec2& gravity, int iterations);
 
-        void setProjectiles(std::vector<Ball2D*>* projectiles); // ✅ Fix: pass pointer!
+        void setProjectiles(std::vector<Ball2D*>* projectiles);
+
+        std::vector<Vertex2D> getLineVertices() const override;
 
     private:
-        std::vector<Ball2D*>* projectiles = nullptr; // ✅ Pointer to live list
+        std::vector<Ball2D*>* projectiles = nullptr;
         void checkCollisionAndTear();
     };
 

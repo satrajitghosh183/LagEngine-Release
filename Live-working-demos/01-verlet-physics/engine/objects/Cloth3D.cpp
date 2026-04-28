@@ -77,27 +77,22 @@ void Cloth3D::createSprings() {
 
 void Cloth3D::createMesh() {
     updateMesh();
-    mesh.upload(true); // Use dynamic buffers
+    // Legacy upload -- no-op in Vulkan build (data stays CPU-side).
+    // The entry point is responsible for uploading to GPU via VulkanBase.
+    mesh.upload(true);
 }
 
 void Cloth3D::update(float /*dt*/) {
     updateMesh();
+    // Legacy no-arg update calls (no-ops in Vulkan build).
     mesh.updateVertices();
     mesh.updateNormals();
 }
 
-void Cloth3D::render(const engine::graphics::Shader& shader) {
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-
-    shader.setMat4("model", glm::mat4(1.0f));
-    shader.setVec3("objectColor", glm::vec3(0.8f, 0.7f, 0.6f));
-    shader.setFloat("roughness", 0.7f);
-    shader.setFloat("metallic", 0.0f);
-
-    mesh.draw(GL_TRIANGLES);
-
-    glDisable(GL_CULL_FACE);
+void Cloth3D::render(const engine::graphics::Shader& /*shader*/) {
+    // In the Vulkan build, rendering is handled by the entry point which
+    // builds vertex data from the cloth and records Vulkan draw commands.
+    // This method is intentionally a no-op.
 }
 
 void Cloth3D::updateMesh() {

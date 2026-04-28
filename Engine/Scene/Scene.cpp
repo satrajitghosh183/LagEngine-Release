@@ -139,29 +139,11 @@ namespace GameEngine {
         Renderer3D::EndScene();
 
         // -----------------------------------------------------------------------
-        // SPH fluid particle rendering — sphere impostors (ported from old_code)
+        // SPH fluid rendering is handled by the engine's Vulkan render path,
+        // which has access to the active render pass and command buffer.
+        // The Scene only drives simulation; rendering happens in Renderer3D
+        // via the entity-with-FluidEmitterComponent query there.
         // -----------------------------------------------------------------------
-        {
-            static Physics::FluidRenderer s_FluidRenderer;
-            static bool s_FluidRendererInit = false;
-            if (!s_FluidRendererInit) {
-                s_FluidRenderer.Init();
-                s_FluidRendererInit = true;
-            }
-
-            if (s_FluidRenderer.IsReady()) {
-                glm::mat4 view = camera->GetViewMatrix();
-                glm::mat4 proj = camera->GetProjectionMatrix();
-                for (auto& entity : GetEntitiesWith<FluidEmitterComponent>()) {
-                    if (!entity.IsActive()) continue;
-                    auto& fe = entity.GetComponent<FluidEmitterComponent>();
-                    if (!fe.Enabled || !fe.SimulationEnabled) continue;
-                    auto positions = fe.GetParticlePositions();
-                    if (!positions.empty())
-                        s_FluidRenderer.Render(positions, view, proj, fe.ParticleSize);
-                }
-            }
-        }
 
         // -----------------------------------------------------------------------
         // GPU particle rendering (compute-shader particles)

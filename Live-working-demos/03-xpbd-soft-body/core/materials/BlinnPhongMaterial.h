@@ -1,6 +1,8 @@
 //
 // Created by barth on 03/10/2022.
 //
+// Vulkan port: stores parameters, no GL calls.
+//
 
 #ifndef FEATHERGL_BLINNPHONGMATERIAL_H
 #define FEATHERGL_BLINNPHONGMATERIAL_H
@@ -13,6 +15,9 @@
 class BlinnPhongMaterial : public Material {
 public:
     explicit BlinnPhongMaterial(std::shared_ptr<Scene> scene);
+
+    // Default constructor for DebugLight compatibility
+    BlinnPhongMaterial() : Material("./assets/shaders/blinnPhong") {}
 
     void setDiffuseTexture(std::shared_ptr<Texture> texture);
 
@@ -55,10 +60,9 @@ private:
 
     std::shared_ptr<ShadowRenderer> _shadowRenderer = nullptr;
 
-    std::shared_ptr<Scene> _scene;
+    std::shared_ptr<Scene> _scene = nullptr;
 
     bool _lightingEnabled = true;
 };
-
 
 #endif //FEATHERGL_BLINNPHONGMATERIAL_H

@@ -1,11 +1,17 @@
 //
 // Created by barth on 19/09/2022.
 //
+// Vulkan port: GPU buffers are created via VulkanBase helpers.
+// The interleaved vertex layout is: [pos.x, pos.y, pos.z, norm.x, norm.y, norm.z, col.r, col.g, col.b]
+// per vertex (9 floats, 36 bytes stride).
+//
 
 #include "Mesh.h"
 #include <iostream>
+#include <cstring>
 
 std::shared_ptr<Material> Mesh::defaultMaterial = std::make_shared<DefaultMaterial>();
+vkdemo::VulkanBase* Mesh::s_VulkanBase = nullptr;
 
 Mesh::Mesh(const char *name) : Transformable(), Renderable(), _name(name) {
     _id = UUID::generate_uuid_v4();
@@ -14,70 +20,73 @@ Mesh::Mesh(const char *name) : Transformable(), Renderable(), _name(name) {
 
 void Mesh::setVertexData(VertexData &vertexData) {
     _vertexData = vertexData;
-
-    int vertexLayoutIndex = 0;
-    glGenBuffers(1, &_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.positions.size() * sizeof(float), _vertexData.positions.data(),
-                 GL_DYNAMIC_READ);
-
-    glGenVertexArrays(1, &_vao);
-    glBindVertexArray(_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glVertexAttribPointer(vertexLayoutIndex, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-    glEnableVertexAttribArray(vertexLayoutIndex);
-
-    glGenBuffers(1, &_ibo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, _vertexData.indices.size() * sizeof(float), _vertexData.indices.data(),
-                 GL_DYNAMIC_READ);
-
-    int normalLayoutIndex = 2;
-    glGenBuffers(1, &_normalVbo);
-    glBindBuffer(GL_ARRAY_BUFFER, _normalVbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.normals.size() * sizeof(float), _vertexData.normals.data(),
-                 GL_DYNAMIC_READ);
-    glVertexAttribPointer(normalLayoutIndex, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), nullptr);
-    glEnableVertexAttribArray(normalLayoutIndex);
-
-    int uvLayoutIndex = 3;
-    glGenBuffers(1, &_uvVbo);
-    glBindBuffer(GL_ARRAY_BUFFER, _uvVbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.uvs.size() * sizeof(float), _vertexData.uvs.data(), GL_DYNAMIC_READ);
-    glVertexAttribPointer(uvLayoutIndex, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), nullptr);
-    glEnableVertexAttribArray(uvLayoutIndex);
-
-    int colorLayoutIndex = 1;
-    glGenBuffers(1, &_colVbo);
-    glBindBuffer(GL_ARRAY_BUFFER, _colVbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.colors.size() * sizeof(float), _vertexData.colors.data(),
-                 GL_DYNAMIC_READ);
-    glVertexAttribPointer(colorLayoutIndex, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), nullptr);
-    glEnableVertexAttribArray(colorLayoutIndex);
+    _gpuDirty = true;
 }
 
+/// Build an interleaved vertex buffer and upload to GPU.
+/// Layout per vertex: pos(3) + normal(3) + color(3) = 9 floats.
 void Mesh::sendVertexDataToGPU() {
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.positions.size() * sizeof(float), _vertexData.positions.data(),
-                 GL_DYNAMIC_READ);
+    if (!s_VulkanBase) return;
 
-    glBindVertexArray(_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+    uint32_t numVerts = static_cast<uint32_t>(_vertexData.positions.size() / 3);
+    if (numVerts == 0) return;
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, _vertexData.indices.size() * sizeof(float), _vertexData.indices.data(),
-                 GL_DYNAMIC_READ);
+    // Build interleaved data
+    const size_t floatsPerVert = 9; // pos(3) + normal(3) + color(3)
+    std::vector<float> interleaved(numVerts * floatsPerVert);
+    for (uint32_t i = 0; i < numVerts; i++) {
+        size_t base = i * floatsPerVert;
+        // Position
+        interleaved[base + 0] = _vertexData.positions[i * 3 + 0];
+        interleaved[base + 1] = _vertexData.positions[i * 3 + 1];
+        interleaved[base + 2] = _vertexData.positions[i * 3 + 2];
+        // Normal
+        if (i * 3 + 2 < _vertexData.normals.size()) {
+            interleaved[base + 3] = _vertexData.normals[i * 3 + 0];
+            interleaved[base + 4] = _vertexData.normals[i * 3 + 1];
+            interleaved[base + 5] = _vertexData.normals[i * 3 + 2];
+        } else {
+            interleaved[base + 3] = 0.0f;
+            interleaved[base + 4] = 1.0f;
+            interleaved[base + 5] = 0.0f;
+        }
+        // Color
+        if (i * 3 + 2 < _vertexData.colors.size()) {
+            interleaved[base + 6] = _vertexData.colors[i * 3 + 0];
+            interleaved[base + 7] = _vertexData.colors[i * 3 + 1];
+            interleaved[base + 8] = _vertexData.colors[i * 3 + 2];
+        } else {
+            interleaved[base + 6] = 1.0f;
+            interleaved[base + 7] = 1.0f;
+            interleaved[base + 8] = 1.0f;
+        }
+    }
 
-    glBindBuffer(GL_ARRAY_BUFFER, _normalVbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.normals.size() * sizeof(float), _vertexData.normals.data(),
-                 GL_DYNAMIC_READ);
+    VkDeviceSize vbSize = interleaved.size() * sizeof(float);
+    VkDeviceSize ibSize = _vertexData.indices.size() * sizeof(int32_t);
 
-    glBindBuffer(GL_ARRAY_BUFFER, _uvVbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.uvs.size() * sizeof(float), _vertexData.uvs.data(), GL_DYNAMIC_READ);
+    // Destroy old buffers
+    if (_vertexBuffer.Buffer != VK_NULL_HANDLE)
+        s_VulkanBase->DestroyBuffer(_vertexBuffer);
+    if (_indexBuffer.Buffer != VK_NULL_HANDLE)
+        s_VulkanBase->DestroyBuffer(_indexBuffer);
 
-    glBindBuffer(GL_ARRAY_BUFFER, _colVbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertexData.colors.size() * sizeof(float), _vertexData.colors.data(),
-                 GL_DYNAMIC_READ);
+    // Create new buffers using host-visible memory for frequent updates
+    _vertexBuffer = s_VulkanBase->CreateBuffer(
+        vbSize,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    s_VulkanBase->CopyToBuffer(_vertexBuffer, interleaved.data(), vbSize);
+
+    // Convert int32_t indices to uint32_t for Vulkan
+    std::vector<uint32_t> indices32(_vertexData.indices.begin(), _vertexData.indices.end());
+    _indexBuffer = s_VulkanBase->CreateBuffer(
+        ibSize,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    s_VulkanBase->CopyToBuffer(_indexBuffer, indices32.data(), ibSize);
+
+    _gpuDirty = false;
 }
 
 void Mesh::setMaterial(std::shared_ptr<Material> material) {
@@ -85,29 +94,19 @@ void Mesh::setMaterial(std::shared_ptr<Material> material) {
 }
 
 void Mesh::render(glm::mat4 projectionViewMatrix, Shader *shaderOverride) {
+    // In the Vulkan port, actual draw command recording is done by
+    // Scene::render(), which iterates meshes and records vkCmdDrawIndexed.
+    // This method is retained for API compatibility and updates the AABB.
     if(!_enabled) return;
 
     const glm::mat4 world = transform()->computeWorldMatrix();
-    const glm::mat4 normalMatrix = transform()->computeNormalMatrix();
-
     _aabb.updateWithVertexData(vertexData(), world);
 
-    auto shader = shaderOverride == nullptr ? _material->shader() : shaderOverride;
-
     if (shaderOverride == nullptr) _material->bind();
-    else shader->bind();
-
-    shader->setMat4("projectionView", &projectionViewMatrix);
-    shader->setMat4("world", &world);
-    shader->setMat4("normalMatrix", &normalMatrix);
-
-    glBindVertexArray(_vao);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    auto drawMode = _vertexData.positions.size() == 6 ? GL_LINES : GL_TRIANGLES;
-    glDrawElements(drawMode, _vertexData.indices.size(), GL_UNSIGNED_INT, nullptr);
+    else shaderOverride->bind();
 
     if (shaderOverride == nullptr) _material->unbind();
-    else shader->unbind();
+    else shaderOverride->unbind();
 }
 
 std::shared_ptr<Mesh> Mesh::FromVertexData(const char *name, VertexData &vertexData) {
@@ -190,4 +189,3 @@ void Mesh::bakeScalingIntoVertexData() {
 
     transform()->setScale(1);
 }
-

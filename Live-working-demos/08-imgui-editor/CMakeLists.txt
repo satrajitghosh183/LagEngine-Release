@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 project(VerletXEditor VERSION 1.0.0 LANGUAGES C CXX)
 
 # C++17 standard
@@ -15,54 +15,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(EDITOR_ENABLE_PROFILING "Enable profiling features" ON)
 
-# Find packages
-find_package(OpenGL REQUIRED)
-
-# GLFW
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-
-include(FetchContent)
-FetchContent_Declare(
-    glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 3.3.8
-)
-FetchContent_MakeAvailable(glfw)
-
-# GLM (header-only math library)
-set(GLM_DIR ${CMAKE_SOURCE_DIR}/external/glm_include)
-
-# ImGui sources
-set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/external/imgui)
-
-set(IMGUI_SOURCES
-    ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_demo.cpp
-    ${IMGUI_DIR}/imgui_draw.cpp
-    ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
-)
-
-set(IMGUI_HEADERS
-    ${IMGUI_DIR}/imgui.h
-    ${IMGUI_DIR}/imconfig.h
-    ${IMGUI_DIR}/imgui_internal.h
-    ${IMGUI_DIR}/imstb_rectpack.h
-    ${IMGUI_DIR}/imstb_textedit.h
-    ${IMGUI_DIR}/imstb_truetype.h
-    ${IMGUI_DIR}/backends/imgui_impl_glfw.h
-    ${IMGUI_DIR}/backends/imgui_impl_opengl3.h
-)
-
-# GLAD sources
-set(GLAD_DIR ${CMAKE_SOURCE_DIR}/external/glad)
-set(GLAD_SOURCES ${GLAD_DIR}/src/glad.c)
-set(GLAD_INCLUDE ${GLAD_DIR}/include)
+# Add the shared VulkanBase library
+add_subdirectory(${CMAKE_SOURCE_DIR}/../common ${CMAKE_BINARY_DIR}/common)
 
 # Editor sources
 set(EDITOR_SOURCES
@@ -93,34 +47,15 @@ set(EDITOR_HEADERS
     panels/PerformancePanel.hpp
 )
 
-# Create ImGui library
-add_library(imgui STATIC ${IMGUI_SOURCES} ${IMGUI_HEADERS})
-target_include_directories(imgui PUBLIC
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/backends
-)
-target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
-
-# Create GLAD library
-add_library(glad STATIC ${GLAD_SOURCES})
-target_include_directories(glad PUBLIC ${GLAD_INCLUDE})
-
 # Create editor executable
 add_executable(VerletXEditor ${EDITOR_SOURCES} ${EDITOR_HEADERS})
 
 target_include_directories(VerletXEditor PRIVATE
     ${CMAKE_SOURCE_DIR}
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/backends
-    ${GLAD_DIR}/include
-    ${GLM_DIR}
 )
 
 target_link_libraries(VerletXEditor PRIVATE
-    imgui
-    glad
-    glfw
-    OpenGL::GL
+    VulkanBase
 )
 
 # Platform-specific settings
@@ -170,6 +105,5 @@ message(STATUS "VerletX Engine Editor Configuration:")
 message(STATUS "  Version: ${PROJECT_VERSION}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "  ImGui Directory: ${IMGUI_DIR}")
-message(STATUS "  GLM Directory: ${GLM_DIR}")
+message(STATUS "  Backend: Vulkan (via VulkanBase)")
 message(STATUS "========================================")

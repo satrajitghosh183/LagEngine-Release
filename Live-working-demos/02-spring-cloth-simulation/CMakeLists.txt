@@ -1,29 +1,56 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.20)
+project(flag_simulation LANGUAGES C CXX)
 
-project(flag_simulation)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions(-std=c++11)
+# ── VulkanBase shared library ────────────────────────────────────────────────
+# Pulls in Vulkan, GLFW, ImGui (Vulkan backend), and GLM transitively.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common
+                 ${CMAKE_CURRENT_BINARY_DIR}/common)
 
-set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake)
+# ── shaderc (runtime GLSL -> SPIR-V compilation) ────────────────────────────
+find_package(Vulkan REQUIRED)
+find_library(SHADERC_LIB shaderc_combined
+    HINTS "$ENV{VULKAN_SDK}/lib" "$ENV{VULKAN_SDK}/Lib")
+if(NOT SHADERC_LIB)
+    find_library(SHADERC_LIB shaderc_shared
+        HINTS "$ENV{VULKAN_SDK}/lib" "$ENV{VULKAN_SDK}/Lib")
+endif()
+if(NOT SHADERC_LIB)
+    message(FATAL_ERROR "shaderc library not found. Install the Vulkan SDK.")
+endif()
+message(STATUS "shaderc: ${SHADERC_LIB}")
 
-find_package(SDL REQUIRED)
-find_package(OpenGL REQUIRED)
-find_package(GLEW REQUIRED)
+# ── Project Sources ──────────────────────────────────────────────────────────
+add_executable(${PROJECT_NAME} src/main.cpp)
 
-# Pour gérer un bug a la fac, a supprimer sur machine perso:
-#set(OPENGL_LIBRARIES /usr/lib/x86_64-linux-gnu/libGL.so.1)
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    $ENV{VULKAN_SDK}/include
+)
 
-include_directories(${SDL_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR} ${GLEW_INCLUDE_DIR} PartyKel/include third-party/AntTweakBar/include third-party/include)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    VulkanBase
+    ${SHADERC_LIB}
+)
 
-add_subdirectory(PartyKel)
-add_subdirectory(third-party/AntTweakBar)
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    GLFW_INCLUDE_VULKAN
+)
 
-set(ALL_LIBRARIES PartyKel AntTweakBar ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${GLEW_LIBRARY})
+# ── Platform linking ────────────────────────────────────────────────────────
+if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+elseif(UNIX AND NOT APPLE)
+    target_link_libraries(${PROJECT_NAME} PRIVATE dl pthread)
+elseif(APPLE)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
+endif()
 
-file(GLOB_RECURSE SRC_FILES src/*.cpp)
-
-foreach(SRC_FILE ${SRC_FILES})
-    get_filename_component(FILE ${SRC_FILE} NAME_WE)
-    add_executable(${FILE} ${SRC_FILE})
-    target_link_libraries(${FILE} ${ALL_LIBRARIES})
-endforeach()
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
+else()
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+endif()

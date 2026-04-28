@@ -1,7 +1,10 @@
 #pragma once
 
 #include "../../Engine/Assets/TemplateManager.hpp"
+#include "../../Engine/Core/Base.hpp"
+#include "../../Engine/Graphics/Texture2D.hpp"
 #include <imgui.h>
+#include <vulkan/vulkan.h>
 #include <string>
 #include <functional>
 #include <vector>
@@ -28,8 +31,8 @@ namespace GameEngine {
         void SetCreateCallback(const CreateCallback& callback) { m_Callback = callback; }
 
     private:
-        // Procedurally generate a 128x128 OpenGL texture thumbnail for a template
-        uint32_t GenerateThumbnailTexture(const std::string& name, const std::string& category);
+        // Procedurally generate a 128x128 Vulkan texture thumbnail for a template
+        void GenerateThumbnail(const std::string& name, const std::string& category);
 
         // Build one texture per loaded template; called once on first render
         void InitThumbnails();
@@ -44,8 +47,12 @@ namespace GameEngine {
         char m_ProjectPath[512] = "";
         CreateCallback m_Callback;
 
-        // One GL texture handle per template (index matches TemplateManager::GetTemplates())
-        std::vector<uint32_t> m_ThumbnailTextures;
+        // One Vulkan texture per template (index matches TemplateManager::GetTemplates())
+        struct ThumbnailEntry {
+            Ref<Texture2D> Texture;
+            VkDescriptorSet ImGuiDescriptor = VK_NULL_HANDLE;
+        };
+        std::vector<ThumbnailEntry> m_Thumbnails;
         bool m_ThumbnailsInitialized = false;
 
         static constexpr int kThumbSize = 128; // texture resolution (square)

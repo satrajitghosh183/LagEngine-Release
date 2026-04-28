@@ -1,4 +1,5 @@
 #include "../../Engine/Core/Application.hpp"
+#include "../../Engine/Core/EntryPoint.hpp"
 #include "../../Engine/Core/Logger.hpp"
 #include "../../Engine/Scripting/VisualScript/VisualScriptGraph.hpp"
 #include "../../Engine/Scripting/VisualScript/VisualScriptVM.hpp"
@@ -53,7 +54,9 @@ protected:
         }
     }
 
-    void OnImGuiRender() override {
+    // Application doesn't expose a dedicated ImGui hook — it's part of
+    // OnRender(). We provide an inline UI helper called from OnRender.
+    void OnImGuiRender() {
         ImGui::Begin("Visual Scripting Demo");
 
         ImGui::Text("Graph: %s", m_Graph->getName().c_str());

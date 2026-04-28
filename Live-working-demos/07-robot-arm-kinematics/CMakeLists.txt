@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.20)
 project(
     robosim
     VERSION 1.0
@@ -7,65 +7,46 @@ project(
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find OpenGL
-find_package(OpenGL REQUIRED)
+# ── VulkanBase shared library ────────────────────────────────────────────────
+# Pulls in Vulkan, GLFW, ImGui (Vulkan backend), and GLM transitively.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common
+                 ${CMAKE_CURRENT_BINARY_DIR}/common)
 
-# Set up Eigen (using the bundled version) - FIXED PATH
+# ── shaderc (runtime GLSL -> SPIR-V compilation) ────────────────────────────
+find_package(Vulkan REQUIRED)
+find_library(SHADERC_LIB shaderc_combined
+    HINTS "$ENV{VULKAN_SDK}/lib" "$ENV{VULKAN_SDK}/Lib")
+if(NOT SHADERC_LIB)
+    find_library(SHADERC_LIB shaderc_shared
+        HINTS "$ENV{VULKAN_SDK}/lib" "$ENV{VULKAN_SDK}/Lib")
+endif()
+if(NOT SHADERC_LIB)
+    message(FATAL_ERROR "shaderc library not found. Install the Vulkan SDK.")
+endif()
+message(STATUS "shaderc: ${SHADERC_LIB}")
+
+# Set up Eigen (using the bundled version)
 set(EIGEN3_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib)
-# Add Eigen as an interface library
 add_library(Eigen3 INTERFACE)
 target_include_directories(Eigen3 INTERFACE ${EIGEN3_INCLUDE_DIR})
 
-# Set up GLEW (using the bundled version)
-set(GLEW_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/lib/GLEW/include)
-if(WIN32)
-    set(GLEW_LIBRARIES ${PROJECT_SOURCE_DIR}/lib/GLEW/lib/Release/x64/glew32.lib)
-else()
-    # For Linux, you might need to install GLEW or build it
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(GLEW REQUIRED glew)
-endif()
-
-# Set up GLFW (using the bundled version)
-set(GLFW_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/lib/GLFW/include)
-if(WIN32)
-    set(GLFW_LIBRARIES ${PROJECT_SOURCE_DIR}/lib/GLFW/lib-vc2022/glfw3.lib)
-else()
-    # For Linux, try to find system GLFW
-    find_package(glfw3 REQUIRED)
-    set(GLFW_LIBRARIES glfw)
-endif()
-
-# Build imgui from source
-set(IMGUI_DIR ${PROJECT_SOURCE_DIR}/lib/imgui/imgui)
-set(IMGUI_SOURCES 
-    "${IMGUI_DIR}/imgui.cpp"
-    "${IMGUI_DIR}/imgui_demo.cpp"
-    "${IMGUI_DIR}/imgui_draw.cpp"
-    "${IMGUI_DIR}/imgui_tables.cpp"
-    "${IMGUI_DIR}/imgui_widgets.cpp"
-    "${IMGUI_DIR}/backends/imgui_impl_glfw.cpp"
-    "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
-)
-
-add_library(imgui ${IMGUI_SOURCES})
-target_include_directories(imgui PUBLIC 
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/backends
-    ${GLFW_INCLUDE_DIRS}
-)
-target_link_libraries(imgui PUBLIC ${GLFW_LIBRARIES} OpenGL::GL)
-if(UNIX)
-    target_link_libraries(imgui PUBLIC ${GLEW_LIBRARIES})
-endif()
-
 # Build ImGuizmo
+set(IMGUI_DIR_LOCAL ${PROJECT_SOURCE_DIR}/lib/imgui/imgui)
 add_library(ImGuizmo ${PROJECT_SOURCE_DIR}/lib/ImGuizmo/ImGuizmo.cpp)
-target_include_directories(ImGuizmo PUBLIC 
+target_include_directories(ImGuizmo PUBLIC
     ${PROJECT_SOURCE_DIR}/lib/ImGuizmo
-    ${IMGUI_DIR}
+    ${IMGUI_DIR_LOCAL}
 )
-target_link_libraries(ImGuizmo PUBLIC imgui)
+# ImGuizmo needs imgui headers — VulkanBase already provides them via imgui_demo,
+# but we also point at the local copy for the header search.
+if(TARGET imgui_demo)
+    target_link_libraries(ImGuizmo PUBLIC imgui_demo)
+elseif(TARGET imgui)
+    target_link_libraries(ImGuizmo PUBLIC imgui)
+else()
+    # Fallback: just use the include directory
+    target_include_directories(ImGuizmo PUBLIC ${IMGUI_DIR_LOCAL})
+endif()
 
 # Project sources
 set(SOURCES
@@ -81,44 +62,48 @@ set(SOURCES
     src/meshes/JointedLinkMesh.cpp
     src/meshes/Mesh.cpp
     src/meshes/SphereMesh.cpp
-    src/rendering/Camera.cpp 
-)
-
-# Include directories - FIXED TO USE lib/ for Eigen
-include_directories(
-    ${PROJECT_SOURCE_DIR}/src
-    ${PROJECT_SOURCE_DIR}/lib
-    ${GLEW_INCLUDE_DIRS}
-    ${GLFW_INCLUDE_DIRS}
-    ${IMGUI_DIR}
-    ${PROJECT_SOURCE_DIR}/lib/ImGuizmo
+    src/rendering/Camera.cpp
 )
 
 # Create the executable
 add_executable(robosim ${SOURCES})
 
+target_include_directories(robosim PRIVATE
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/lib
+    ${PROJECT_SOURCE_DIR}/lib/ImGuizmo
+    $ENV{VULKAN_SDK}/include
+)
+
 # Link libraries
 target_link_libraries(robosim PRIVATE
-    OpenGL::GL
-    imgui
+    VulkanBase
+    ${SHADERC_LIB}
     ImGuizmo
     Eigen3
 )
 
+target_compile_definitions(robosim PRIVATE
+    GLFW_INCLUDE_VULKAN
+)
+
 # Platform-specific linking
 if(WIN32)
+    target_compile_definitions(robosim PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+elseif(UNIX AND NOT APPLE)
+    target_link_libraries(robosim PRIVATE dl pthread)
+elseif(APPLE)
     target_link_libraries(robosim PRIVATE
-        ${GLFW_LIBRARIES}
-        ${GLEW_LIBRARIES}
-    )
+        "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
+endif()
+
+if(MSVC)
+    target_compile_options(robosim PRIVATE /W3)
 else()
-    target_link_libraries(robosim PRIVATE
-        ${GLFW_LIBRARIES}
-        ${GLEW_LIBRARIES}
-    )
+    target_compile_options(robosim PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-parameter)
 endif()
 
 # Set output directory
-set_target_properties(robosim PROPERTIES 
+set_target_properties(robosim PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )

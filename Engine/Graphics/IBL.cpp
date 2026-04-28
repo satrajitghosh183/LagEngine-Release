@@ -1,384 +1,550 @@
 #include "IBL.hpp"
-#include "RenderCommand.hpp"
+#include "Vulkan/VulkanDevice.hpp"
 #include "../Core/Logger.hpp"
-#include <glad/glad.h>
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <cstring>
+#include <cmath>
+#include <vector>
+#include <array>
+#include <random>
+#include <algorithm>
 
 namespace GameEngine {
 
-    uint32_t IBL::s_EnvCubemap = 0;
-    uint32_t IBL::s_IrradianceMap = 0;
-    uint32_t IBL::s_PrefilterMap = 0;
-    uint32_t IBL::s_BRDFLUT = 0;
+    // -------------------------------------------------------------------------
+    // Static definitions
+    // -------------------------------------------------------------------------
+
+    VkImage       IBL::s_IrradianceImage  = VK_NULL_HANDLE;
+    VmaAllocation IBL::s_IrradianceAlloc  = VK_NULL_HANDLE;
+    VkImageView   IBL::s_IrradianceView   = VK_NULL_HANDLE;
+
+    VkImage       IBL::s_PrefilterImage   = VK_NULL_HANDLE;
+    VmaAllocation IBL::s_PrefilterAlloc   = VK_NULL_HANDLE;
+    VkImageView   IBL::s_PrefilterView    = VK_NULL_HANDLE;
+    uint32_t      IBL::s_PrefilterMipLevels = 5;
+
+    VkImage       IBL::s_BRDFLUTImage     = VK_NULL_HANDLE;
+    VmaAllocation IBL::s_BRDFLUTAlloc     = VK_NULL_HANDLE;
+    VkImageView   IBL::s_BRDFLUTView      = VK_NULL_HANDLE;
+
+    VkSampler     IBL::s_CubemapSampler   = VK_NULL_HANDLE;
+    VkSampler     IBL::s_LUTSampler       = VK_NULL_HANDLE;
+
     bool IBL::s_Initialized = false;
-    Ref<Shader> IBL::s_BRDFShader;
 
-    // Cube VAO for rendering to cubemap faces
-    static uint32_t s_CubeVAO = 0;
-    static uint32_t s_CubeVBO = 0;
-    static uint32_t s_QuadVAO = 0;
-    static uint32_t s_QuadVBO = 0;
-
-    static void CreateCube() {
-        if (s_CubeVAO != 0) return;
-        float vertices[] = {
-            -1, -1, -1,  1, -1, -1,  1,  1, -1,  1,  1, -1, -1,  1, -1, -1, -1, -1,
-            -1, -1,  1,  1, -1,  1,  1,  1,  1,  1,  1,  1, -1,  1,  1, -1, -1,  1,
-            -1,  1,  1, -1,  1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  1, -1,  1,  1,
-             1,  1,  1,  1,  1, -1,  1, -1, -1,  1, -1, -1,  1, -1,  1,  1,  1,  1,
-            -1, -1, -1,  1, -1, -1,  1, -1,  1,  1, -1,  1, -1, -1,  1, -1, -1, -1,
-            -1,  1, -1,  1,  1, -1,  1,  1,  1,  1,  1,  1, -1,  1,  1, -1,  1, -1
-        };
-        glGenVertexArrays(1, &s_CubeVAO);
-        glGenBuffers(1, &s_CubeVBO);
-        glBindVertexArray(s_CubeVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, s_CubeVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-        glBindVertexArray(0);
-    }
-
-    static void CreateQuad() {
-        if (s_QuadVAO != 0) return;
-        float vertices[] = {
-            -1, -1, 0, 0,
-             1, -1, 1, 0,
-             1,  1, 1, 1,
-            -1, -1, 0, 0,
-             1,  1, 1, 1,
-            -1,  1, 0, 1
-        };
-        glGenVertexArrays(1, &s_QuadVAO);
-        glGenBuffers(1, &s_QuadVBO);
-        glBindVertexArray(s_QuadVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, s_QuadVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-        glBindVertexArray(0);
-    }
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
 
     void IBL::Init() {
         if (s_Initialized) return;
 
-        CreateCube();
-        CreateQuad();
+        auto& dev = VulkanDevice::Get();
+        VkDevice d = dev.GetDevice();
+
+        // ---- Samplers ----
+        {
+            VkSamplerCreateInfo sci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+            sci.magFilter        = VK_FILTER_LINEAR;
+            sci.minFilter        = VK_FILTER_LINEAR;
+            sci.mipmapMode       = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            sci.addressModeU     = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            sci.addressModeV     = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            sci.addressModeW     = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            sci.maxLod           = static_cast<float>(s_PrefilterMipLevels);
+            sci.anisotropyEnable = VK_FALSE;
+            vkCreateSampler(d, &sci, nullptr, &s_CubemapSampler);
+
+            sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            sci.maxLod     = 0.0f;
+            vkCreateSampler(d, &sci, nullptr, &s_LUTSampler);
+        }
+
+        GenerateProceduralCubemaps();
         GenerateBRDFLUT();
-        GenerateProceduralCubemap();
-        GenerateIrradianceMap();
-        GeneratePrefilterMap();
 
         s_Initialized = true;
-        GE_CORE_INFO("IBL initialized (procedural sky, BRDF LUT {}x{})", 512, 512);
+        GE_CORE_INFO("IBL initialized (procedural sky, BRDF LUT 512x512, prefilter {}x{} {} mips)",
+                     128, 128, s_PrefilterMipLevels);
     }
 
     void IBL::Shutdown() {
-        if (s_EnvCubemap) glDeleteTextures(1, &s_EnvCubemap);
-        if (s_IrradianceMap) glDeleteTextures(1, &s_IrradianceMap);
-        if (s_PrefilterMap) glDeleteTextures(1, &s_PrefilterMap);
-        if (s_BRDFLUT) glDeleteTextures(1, &s_BRDFLUT);
-        if (s_CubeVAO) { glDeleteVertexArrays(1, &s_CubeVAO); glDeleteBuffers(1, &s_CubeVBO); }
-        if (s_QuadVAO) { glDeleteVertexArrays(1, &s_QuadVAO); glDeleteBuffers(1, &s_QuadVBO); }
-        s_EnvCubemap = s_IrradianceMap = s_PrefilterMap = s_BRDFLUT = 0;
-        s_CubeVAO = s_CubeVBO = s_QuadVAO = s_QuadVBO = 0;
-        s_Initialized = false;
-        s_BRDFShader.reset();
+        if (!s_Initialized) return;
+
+        auto& dev = VulkanDevice::Get();
+        VkDevice d = dev.GetDevice();
+        VmaAllocator a = dev.GetAllocator();
+
+        vkDeviceWaitIdle(d);
+
+        if (s_IrradianceView)  vkDestroyImageView(d, s_IrradianceView,  nullptr);
+        if (s_IrradianceImage) vmaDestroyImage(a, s_IrradianceImage, s_IrradianceAlloc);
+
+        if (s_PrefilterView)   vkDestroyImageView(d, s_PrefilterView,   nullptr);
+        if (s_PrefilterImage)  vmaDestroyImage(a, s_PrefilterImage,  s_PrefilterAlloc);
+
+        if (s_BRDFLUTView)     vkDestroyImageView(d, s_BRDFLUTView,     nullptr);
+        if (s_BRDFLUTImage)    vmaDestroyImage(a, s_BRDFLUTImage,    s_BRDFLUTAlloc);
+
+        if (s_CubemapSampler)  vkDestroySampler(d, s_CubemapSampler, nullptr);
+        if (s_LUTSampler)      vkDestroySampler(d, s_LUTSampler,     nullptr);
+
+        s_IrradianceImage = VK_NULL_HANDLE;  s_IrradianceView  = VK_NULL_HANDLE;
+        s_PrefilterImage  = VK_NULL_HANDLE;  s_PrefilterView   = VK_NULL_HANDLE;
+        s_BRDFLUTImage    = VK_NULL_HANDLE;  s_BRDFLUTView     = VK_NULL_HANDLE;
+        s_CubemapSampler  = VK_NULL_HANDLE;  s_LUTSampler      = VK_NULL_HANDLE;
+        s_Initialized     = false;
     }
 
-    void IBL::Bind(uint32_t irradianceSlot, uint32_t prefilterSlot, uint32_t brdfLUTSlot) {
-        if (!s_Initialized) return;
-        glActiveTexture(GL_TEXTURE0 + irradianceSlot);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, s_IrradianceMap);
-        glActiveTexture(GL_TEXTURE0 + prefilterSlot);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, s_PrefilterMap);
-        glActiveTexture(GL_TEXTURE0 + brdfLUTSlot);
-        glBindTexture(GL_TEXTURE_2D, s_BRDFLUT);
+    // -------------------------------------------------------------------------
+    // GPU image helpers
+    // -------------------------------------------------------------------------
+
+    void IBL::CreateCubemapImage(uint32_t size, uint32_t mipLevels, VkFormat fmt,
+                                  VkImage& outImage, VmaAllocation& outAlloc,
+                                  VkImageView& outView) {
+        auto& dev = VulkanDevice::Get();
+        VkDevice d = dev.GetDevice();
+        VmaAllocator a = dev.GetAllocator();
+
+        VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ici.imageType   = VK_IMAGE_TYPE_2D;
+        ici.format      = fmt;
+        ici.extent      = {size, size, 1};
+        ici.mipLevels   = mipLevels;
+        ici.arrayLayers = 6;
+        ici.samples     = VK_SAMPLE_COUNT_1_BIT;
+        ici.tiling      = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage       = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        ici.flags       = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+
+        VmaAllocationCreateInfo vaci{};
+        vaci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        vmaCreateImage(a, &ici, &vaci, &outImage, &outAlloc, nullptr);
+
+        VkImageViewCreateInfo ivci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        ivci.image    = outImage;
+        ivci.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        ivci.format   = fmt;
+        ivci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        ivci.subresourceRange.baseMipLevel   = 0;
+        ivci.subresourceRange.levelCount     = mipLevels;
+        ivci.subresourceRange.baseArrayLayer = 0;
+        ivci.subresourceRange.layerCount     = 6;
+        vkCreateImageView(d, &ivci, nullptr, &outView);
     }
 
-    void IBL::ApplyToShader(const Ref<Shader>& shader,
-                            uint32_t irradianceSlot, uint32_t prefilterSlot, uint32_t brdfLUTSlot) {
-        if (!s_Initialized) return;
-        Bind(irradianceSlot, prefilterSlot, brdfLUTSlot);
-        shader->SetUniformInt("u_IrradianceMap", static_cast<int>(irradianceSlot));
-        shader->SetUniformInt("u_PrefilterMap", static_cast<int>(prefilterSlot));
-        shader->SetUniformInt("u_BRDFLUT", static_cast<int>(brdfLUTSlot));
-        shader->SetUniformInt("u_HasIBL", 1);
+    void IBL::Create2DImage(uint32_t width, uint32_t height, VkFormat fmt,
+                             VkImage& outImage, VmaAllocation& outAlloc,
+                             VkImageView& outView) {
+        auto& dev = VulkanDevice::Get();
+        VkDevice d = dev.GetDevice();
+        VmaAllocator a = dev.GetAllocator();
+
+        VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ici.imageType   = VK_IMAGE_TYPE_2D;
+        ici.format      = fmt;
+        ici.extent      = {width, height, 1};
+        ici.mipLevels   = 1;
+        ici.arrayLayers = 1;
+        ici.samples     = VK_SAMPLE_COUNT_1_BIT;
+        ici.tiling      = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage       = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+        VmaAllocationCreateInfo vaci{};
+        vaci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        vmaCreateImage(a, &ici, &vaci, &outImage, &outAlloc, nullptr);
+
+        VkImageViewCreateInfo ivci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        ivci.image    = outImage;
+        ivci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        ivci.format   = fmt;
+        ivci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        ivci.subresourceRange.levelCount = 1;
+        ivci.subresourceRange.layerCount = 1;
+        vkCreateImageView(d, &ivci, nullptr, &outView);
+    }
+
+    void IBL::TransitionCubemapLayout(VkCommandBuffer cmd, VkImage image,
+                                       VkImageLayout oldL, VkImageLayout newL,
+                                       uint32_t mipLevels) {
+        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        barrier.oldLayout           = oldL;
+        barrier.newLayout           = newL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = image;
+        barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel   = 0;
+        barrier.subresourceRange.levelCount     = mipLevels;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount     = 6;
+
+        VkPipelineStageFlags src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        VkPipelineStageFlags dst = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+        if (oldL == VK_IMAGE_LAYOUT_UNDEFINED && newL == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        } else if (oldL == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+                   newL == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            src = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            dst = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        }
+
+        vkCmdPipelineBarrier(cmd, src, dst, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    // -------------------------------------------------------------------------
+    // Upload helper: create staging buffer, copy, destroy
+    // -------------------------------------------------------------------------
+
+    static VkBuffer UploadCubemapLayer(VmaAllocator allocator,
+                                        const void* data, VkDeviceSize size,
+                                        VmaAllocation& outAlloc) {
+        VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bci.size  = size;
+        bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+        VmaAllocationCreateInfo aci{};
+        aci.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+        aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo ai{};
+        VkBuffer buf;
+        vmaCreateBuffer(allocator, &bci, &aci, &buf, &outAlloc, &ai);
+        std::memcpy(ai.pMappedData, data, size);
+        return buf;
+    }
+
+    // -------------------------------------------------------------------------
+    // Procedural sky cubemaps
+    // -------------------------------------------------------------------------
+
+    void IBL::GenerateProceduralCubemaps() {
+        auto& dev = VulkanDevice::Get();
+        VmaAllocator a = dev.GetAllocator();
+
+        // ---- Irradiance (32x32, simple directional average) ----
+        const uint32_t irrSize = 32;
+        CreateCubemapImage(irrSize, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
+                            s_IrradianceImage, s_IrradianceAlloc, s_IrradianceView);
+
+        glm::vec3 skyAvg(0.35f, 0.50f, 0.75f);
+        glm::vec3 groundAvg(0.10f, 0.09f, 0.08f);
+        glm::vec3 faceColors[6] = {
+            skyAvg * 0.6f, skyAvg * 0.6f, skyAvg, groundAvg, skyAvg * 0.6f, skyAvg * 0.6f
+        };
+
+        // ---- Prefilter (128x128 x 5 mips) ----
+        const uint32_t preSize = 128;
+        CreateCubemapImage(preSize, s_PrefilterMipLevels, VK_FORMAT_R16G16B16A16_SFLOAT,
+                            s_PrefilterImage, s_PrefilterAlloc, s_PrefilterView);
+
+        // ---- Upload all faces via single-time commands ----
+        VkCommandBuffer cmd = dev.BeginSingleTimeCommands();
+
+        // Transition irradiance + prefilter to TRANSFER_DST
+        TransitionCubemapLayout(cmd, s_IrradianceImage,
+                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        TransitionCubemapLayout(cmd, s_PrefilterImage,
+                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 s_PrefilterMipLevels);
+
+        // ---- Irradiance faces ----
+        std::vector<std::pair<VkBuffer, VmaAllocation>> stagingBufs;
+
+        for (uint32_t face = 0; face < 6; face++) {
+            std::vector<uint16_t> data(irrSize * irrSize * 4);
+            glm::vec3 col = faceColors[face];
+            // Pack as f16 (approximate via bit cast from f32 truncation for simplicity)
+            // Use full uint16 range to represent [0,1]: we store as half-float.
+            // Simple approach: store as raw RGBA16F — encode via a lambda.
+            auto f32ToF16 = [](float v) -> uint16_t {
+                // IEEE 754 half-float conversion
+                uint32_t f;
+                std::memcpy(&f, &v, 4);
+                uint16_t h = static_cast<uint16_t>(
+                    ((f >> 16) & 0x8000) |
+                    ((((f & 0x7F800000) - 0x38000000) >> 13) & 0x7C00) |
+                    ((f >> 13) & 0x03FF));
+                return h;
+            };
+            for (uint32_t i = 0; i < irrSize * irrSize; i++) {
+                data[i * 4 + 0] = f32ToF16(col.r);
+                data[i * 4 + 1] = f32ToF16(col.g);
+                data[i * 4 + 2] = f32ToF16(col.b);
+                data[i * 4 + 3] = f32ToF16(1.0f);
+            }
+
+            VmaAllocation stageAlloc;
+            VkBuffer stageBuf = UploadCubemapLayer(a, data.data(),
+                                                    data.size() * sizeof(uint16_t), stageAlloc);
+            stagingBufs.push_back({stageBuf, stageAlloc});
+
+            VkBufferImageCopy region{};
+            region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel       = 0;
+            region.imageSubresource.baseArrayLayer = face;
+            region.imageSubresource.layerCount     = 1;
+            region.imageExtent                     = {irrSize, irrSize, 1};
+            vkCmdCopyBufferToImage(cmd, stageBuf, s_IrradianceImage,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        }
+
+        // ---- Prefilter mip faces ----
+        for (uint32_t mip = 0; mip < s_PrefilterMipLevels; mip++) {
+            uint32_t mipSize = std::max(1u, preSize >> mip);
+            float roughness  = static_cast<float>(mip) / static_cast<float>(s_PrefilterMipLevels - 1);
+            glm::vec3 topCol    = glm::mix(glm::vec3(0.20f, 0.40f, 0.80f), skyAvg, roughness);
+            glm::vec3 horizCol  = glm::mix(glm::vec3(0.60f, 0.70f, 0.90f), skyAvg, roughness);
+
+            auto f32ToF16 = [](float v) -> uint16_t {
+                uint32_t f;
+                std::memcpy(&f, &v, 4);
+                uint16_t h = static_cast<uint16_t>(
+                    ((f >> 16) & 0x8000) |
+                    ((((f & 0x7F800000) - 0x38000000) >> 13) & 0x7C00) |
+                    ((f >> 13) & 0x03FF));
+                return h;
+            };
+
+            for (uint32_t face = 0; face < 6; face++) {
+                std::vector<uint16_t> data(mipSize * mipSize * 4);
+                for (uint32_t y = 0; y < mipSize; y++) {
+                    for (uint32_t x = 0; x < mipSize; x++) {
+                        float t = (face == 2) ? 1.0f : (face == 3) ? -0.5f :
+                                  (static_cast<float>(y) / static_cast<float>(mipSize) - 0.5f) * -2.0f;
+
+                        glm::vec3 col = (t > 0.0f)
+                            ? glm::mix(horizCol, topCol, t * 0.5f)
+                            : glm::mix(horizCol, skyAvg * 0.3f, -t);
+
+                        uint32_t idx = (y * mipSize + x) * 4;
+                        data[idx + 0] = f32ToF16(col.r);
+                        data[idx + 1] = f32ToF16(col.g);
+                        data[idx + 2] = f32ToF16(col.b);
+                        data[idx + 3] = f32ToF16(1.0f);
+                    }
+                }
+
+                VmaAllocation stageAlloc;
+                VkBuffer stageBuf = UploadCubemapLayer(a, data.data(),
+                                                        data.size() * sizeof(uint16_t), stageAlloc);
+                stagingBufs.push_back({stageBuf, stageAlloc});
+
+                VkBufferImageCopy region{};
+                region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.imageSubresource.mipLevel       = mip;
+                region.imageSubresource.baseArrayLayer = face;
+                region.imageSubresource.layerCount     = 1;
+                region.imageExtent                     = {mipSize, mipSize, 1};
+                vkCmdCopyBufferToImage(cmd, stageBuf, s_PrefilterImage,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+            }
+        }
+
+        // Transition to shader read
+        TransitionCubemapLayout(cmd, s_IrradianceImage,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        TransitionCubemapLayout(cmd, s_PrefilterImage,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 s_PrefilterMipLevels);
+
+        dev.EndSingleTimeCommands(cmd);
+
+        // Free staging buffers
+        for (auto& [buf, alloc] : stagingBufs) {
+            vmaDestroyBuffer(a, buf, alloc);
+        }
+
+        GE_CORE_DEBUG("IBL: Irradiance ({}x{}) and prefilter ({}x{}, {} mips) generated",
+                      irrSize, irrSize, preSize, preSize, s_PrefilterMipLevels);
+    }
+
+    // -------------------------------------------------------------------------
+    // BRDF LUT — CPU-computed split-sum approximation, uploaded as R16G16F
+    // -------------------------------------------------------------------------
+
+    static float RadicalInverse_VdC(uint32_t bits) {
+        bits = (bits << 16u) | (bits >> 16u);
+        bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+        bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+        bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+        bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+        return static_cast<float>(bits) * 2.3283064365386963e-10f;
+    }
+
+    static glm::vec2 Hammersley(uint32_t i, uint32_t N) {
+        return {static_cast<float>(i) / static_cast<float>(N), RadicalInverse_VdC(i)};
+    }
+
+    static glm::vec3 ImportanceSampleGGX(glm::vec2 Xi, glm::vec3 N, float roughness) {
+        const float PI = 3.14159265359f;
+        float a = roughness * roughness;
+        float phi = 2.0f * PI * Xi.x;
+        float cosTheta = std::sqrt((1.0f - Xi.y) / (1.0f + (a * a - 1.0f) * Xi.y));
+        float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
+        glm::vec3 H(std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta);
+        glm::vec3 up = std::abs(N.z) < 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(1, 0, 0);
+        glm::vec3 tangent   = glm::normalize(glm::cross(up, N));
+        glm::vec3 bitangent = glm::cross(N, tangent);
+        return glm::normalize(tangent * H.x + bitangent * H.y + N * H.z);
+    }
+
+    static float GeometrySchlickGGX(float NdotV, float roughness) {
+        float k = (roughness * roughness) / 2.0f;
+        return NdotV / (NdotV * (1.0f - k) + k);
+    }
+
+    static float GeometrySmith(float NdotV, float NdotL, float roughness) {
+        return GeometrySchlickGGX(NdotV, roughness) * GeometrySchlickGGX(NdotL, roughness);
+    }
+
+    static glm::vec2 IntegrateBRDF(float NdotV, float roughness) {
+        glm::vec3 V(std::sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV);
+        float A = 0.0f, B = 0.0f;
+        constexpr uint32_t SAMPLES = 1024;
+        glm::vec3 N(0.0f, 0.0f, 1.0f);
+        for (uint32_t i = 0; i < SAMPLES; i++) {
+            glm::vec2 Xi = Hammersley(i, SAMPLES);
+            glm::vec3 H  = ImportanceSampleGGX(Xi, N, roughness);
+            glm::vec3 L  = glm::normalize(2.0f * glm::dot(V, H) * H - V);
+            float NdotL  = std::max(L.z, 0.0f);
+            float NdotH  = std::max(H.z, 0.0f);
+            float VdotH  = std::max(glm::dot(V, H), 0.0f);
+            if (NdotL > 0.0f) {
+                float G    = GeometrySmith(NdotV, NdotL, roughness);
+                float GVis = (G * VdotH) / (NdotH * NdotV + 1e-7f);
+                float Fc   = std::pow(1.0f - VdotH, 5.0f);
+                A += (1.0f - Fc) * GVis;
+                B += Fc * GVis;
+            }
+        }
+        return {A / static_cast<float>(SAMPLES), B / static_cast<float>(SAMPLES)};
     }
 
     void IBL::GenerateBRDFLUT() {
-        const char* brdfVert = R"(
-            #version 420 core
-            layout(location = 0) in vec2 a_Position;
-            layout(location = 1) in vec2 a_TexCoord;
-            out vec2 v_TexCoord;
-            void main() {
-                v_TexCoord = a_TexCoord;
-                gl_Position = vec4(a_Position, 0.0, 1.0);
-            }
-        )";
+        const uint32_t LUT_SIZE = 512;
+        Create2DImage(LUT_SIZE, LUT_SIZE, VK_FORMAT_R16G16_SFLOAT,
+                      s_BRDFLUTImage, s_BRDFLUTAlloc, s_BRDFLUTView);
 
-        const char* brdfFrag = R"(
-            #version 420 core
-            in vec2 v_TexCoord;
-            out vec2 FragColor;
+        // CPU-compute the LUT (1024 samples x 512x512 ≈ 1-2 seconds at init)
+        // For a production engine this would be a GPU compute shader; here we
+        // keep it on the CPU to avoid depending on a compiled SPIR-V file.
+        std::vector<uint16_t> pixels(LUT_SIZE * LUT_SIZE * 2); // RG16F
 
-            const float PI = 3.14159265359;
-
-            float RadicalInverse_VdC(uint bits) {
-                bits = (bits << 16u) | (bits >> 16u);
-                bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-                bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-                bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-                bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-                return float(bits) * 2.3283064365386963e-10;
-            }
-
-            vec2 Hammersley(uint i, uint N) {
-                return vec2(float(i) / float(N), RadicalInverse_VdC(i));
-            }
-
-            vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness) {
-                float a = roughness * roughness;
-                float phi = 2.0 * PI * Xi.x;
-                float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a*a - 1.0) * Xi.y));
-                float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-                vec3 H = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-                vec3 up = abs(N.z) < 0.999 ? vec3(0,0,1) : vec3(1,0,0);
-                vec3 tangent = normalize(cross(up, N));
-                vec3 bitangent = cross(N, tangent);
-                return normalize(tangent * H.x + bitangent * H.y + N * H.z);
-            }
-
-            float GeometrySchlickGGX(float NdotV, float roughness) {
-                float a = roughness;
-                float k = (a * a) / 2.0;
-                return NdotV / (NdotV * (1.0 - k) + k);
-            }
-
-            float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
-                float NdotV = max(dot(N, V), 0.0);
-                float NdotL = max(dot(N, L), 0.0);
-                return GeometrySchlickGGX(NdotV, roughness) * GeometrySchlickGGX(NdotL, roughness);
-            }
-
-            vec2 IntegrateBRDF(float NdotV, float roughness) {
-                vec3 V = vec3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);
-                float A = 0.0, B = 0.0;
-                vec3 N = vec3(0.0, 0.0, 1.0);
-                const uint SAMPLE_COUNT = 1024u;
-                for (uint i = 0u; i < SAMPLE_COUNT; ++i) {
-                    vec2 Xi = Hammersley(i, SAMPLE_COUNT);
-                    vec3 H = ImportanceSampleGGX(Xi, N, roughness);
-                    vec3 L = normalize(2.0 * dot(V, H) * H - V);
-                    float NdotL = max(L.z, 0.0);
-                    float NdotH = max(H.z, 0.0);
-                    float VdotH = max(dot(V, H), 0.0);
-                    if (NdotL > 0.0) {
-                        float G = GeometrySmith(N, V, L, roughness);
-                        float G_Vis = (G * VdotH) / (NdotH * NdotV);
-                        float Fc = pow(1.0 - VdotH, 5.0);
-                        A += (1.0 - Fc) * G_Vis;
-                        B += Fc * G_Vis;
-                    }
-                }
-                return vec2(A, B) / float(SAMPLE_COUNT);
-            }
-
-            void main() {
-                FragColor = IntegrateBRDF(v_TexCoord.x, v_TexCoord.y);
-            }
-        )";
-
-        s_BRDFShader = CreateRef<Shader>("BRDF_LUT", brdfVert, brdfFrag);
-
-        // Create BRDF LUT texture
-        glGenTextures(1, &s_BRDFLUT);
-        glBindTexture(GL_TEXTURE_2D, s_BRDFLUT);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, 512, 512, 0, GL_RG, GL_FLOAT, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        // Render BRDF LUT
-        uint32_t fbo;
-        glGenFramebuffers(1, &fbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_BRDFLUT, 0);
-
-        GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-        if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
-            GE_CORE_ERROR("IBL: BRDF LUT framebuffer incomplete (status: 0x{:X})", fboStatus);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glDeleteFramebuffers(1, &fbo);
-            return;
-        }
-
-        glViewport(0, 0, 512, 512);
-        s_BRDFShader->Bind();
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glBindVertexArray(s_QuadVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-        glBindVertexArray(0);
-        s_BRDFShader->Unbind();
-
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glDeleteFramebuffers(1, &fbo);
-
-        GE_CORE_DEBUG("IBL: BRDF LUT generated");
-    }
-
-    void IBL::GenerateProceduralCubemap() {
-        // Generate a simple gradient sky cubemap procedurally (no HDR file needed)
-        const int size = 64;
-        glGenTextures(1, &s_EnvCubemap);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, s_EnvCubemap);
-
-        // Sky gradient colors
-        glm::vec3 skyTop(0.2f, 0.4f, 0.8f);
-        glm::vec3 skyHorizon(0.6f, 0.7f, 0.9f);
-        glm::vec3 ground(0.15f, 0.12f, 0.1f);
-
-        for (int face = 0; face < 6; face++) {
-            std::vector<float> data(size * size * 3);
-            for (int y = 0; y < size; y++) {
-                for (int x = 0; x < size; x++) {
-                    // Simple vertical gradient based on face
-                    float t;
-                    if (face == 2) t = 1.0f; // +Y (top)
-                    else if (face == 3) t = -1.0f; // -Y (bottom)
-                    else t = (float(y) / float(size) - 0.5f) * -2.0f;
-
-                    glm::vec3 color;
-                    if (t > 0.0f) {
-                        color = glm::mix(skyHorizon, skyTop, t);
-                    } else {
-                        color = glm::mix(skyHorizon, ground, -t);
-                    }
-
-                    int idx = (y * size + x) * 3;
-                    data[idx] = color.r;
-                    data[idx + 1] = color.g;
-                    data[idx + 2] = color.b;
-                }
-            }
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGB16F,
-                         size, size, 0, GL_RGB, GL_FLOAT, data.data());
-        }
-
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        GE_CORE_DEBUG("IBL: Procedural sky cubemap generated ({}x{})", size, size);
-    }
-
-    void IBL::GenerateIrradianceMap() {
-        // For the procedural sky, generate a simple averaged irradiance cubemap
-        const int size = 32;
-        glGenTextures(1, &s_IrradianceMap);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, s_IrradianceMap);
-
-        // Simple diffuse irradiance: average sky color per face direction
-        glm::vec3 skyAvg(0.35f, 0.5f, 0.75f);
-        glm::vec3 groundAvg(0.1f, 0.09f, 0.08f);
-
-        glm::vec3 faceColors[6] = {
-            skyAvg * 0.6f,                                  // +X
-            skyAvg * 0.6f,                                  // -X
-            skyAvg,                                         // +Y (top)
-            groundAvg,                                      // -Y (bottom)
-            skyAvg * 0.6f,                                  // +Z
-            skyAvg * 0.6f                                   // -Z
+        auto f32ToF16 = [](float v) -> uint16_t {
+            v = std::max(0.0f, std::min(v, 1.0f));
+            uint32_t f;
+            std::memcpy(&f, &v, 4);
+            uint16_t h = static_cast<uint16_t>(
+                ((f >> 16) & 0x8000) |
+                ((((f & 0x7F800000) - 0x38000000) >> 13) & 0x7C00) |
+                ((f >> 13) & 0x03FF));
+            return h;
         };
 
-        for (int face = 0; face < 6; face++) {
-            std::vector<float> data(size * size * 3);
-            for (int i = 0; i < size * size; i++) {
-                data[i * 3] = faceColors[face].r;
-                data[i * 3 + 1] = faceColors[face].g;
-                data[i * 3 + 2] = faceColors[face].b;
+        for (uint32_t y = 0; y < LUT_SIZE; y++) {
+            float roughness = (static_cast<float>(y) + 0.5f) / static_cast<float>(LUT_SIZE);
+            for (uint32_t x = 0; x < LUT_SIZE; x++) {
+                float NdotV = (static_cast<float>(x) + 0.5f) / static_cast<float>(LUT_SIZE);
+                glm::vec2 brdf = IntegrateBRDF(NdotV, roughness);
+                uint32_t idx = (y * LUT_SIZE + x) * 2;
+                pixels[idx + 0] = f32ToF16(brdf.x);
+                pixels[idx + 1] = f32ToF16(brdf.y);
             }
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGB16F,
-                         size, size, 0, GL_RGB, GL_FLOAT, data.data());
         }
 
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        // Upload via staging buffer
+        auto& dev = VulkanDevice::Get();
+        VmaAllocator a = dev.GetAllocator();
+        VkDeviceSize dataSize = pixels.size() * sizeof(uint16_t);
 
-        GE_CORE_DEBUG("IBL: Irradiance map generated ({}x{})", size, size);
+        VkBuffer stageBuf;
+        VmaAllocation stageAlloc;
+        VmaAllocationInfo stageInfo{};
+        VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bci.size  = dataSize;
+        bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        VmaAllocationCreateInfo saci{};
+        saci.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+        saci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        vmaCreateBuffer(a, &bci, &saci, &stageBuf, &stageAlloc, &stageInfo);
+        std::memcpy(stageInfo.pMappedData, pixels.data(), dataSize);
+
+        VkCommandBuffer cmd = dev.BeginSingleTimeCommands();
+
+        // Transition UNDEFINED -> TRANSFER_DST
+        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = s_BRDFLUTImage;
+        barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        barrier.srcAccessMask       = 0;
+        barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        VkBufferImageCopy region{};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent      = {LUT_SIZE, LUT_SIZE, 1};
+        vkCmdCopyBufferToImage(cmd, stageBuf, s_BRDFLUTImage,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        dev.EndSingleTimeCommands(cmd);
+        vmaDestroyBuffer(a, stageBuf, stageAlloc);
+
+        GE_CORE_DEBUG("IBL: BRDF LUT generated ({}x{})", LUT_SIZE, LUT_SIZE);
     }
 
-    void IBL::GeneratePrefilterMap() {
-        // Generate prefiltered environment map with mip levels for roughness
-        const int size = 128;
-        const int maxMipLevels = 5;
+    // -------------------------------------------------------------------------
+    // Descriptor infos
+    // -------------------------------------------------------------------------
 
-        glGenTextures(1, &s_PrefilterMap);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, s_PrefilterMap);
+    VkDescriptorImageInfo IBL::GetIrradianceDescriptorInfo() {
+        VkDescriptorImageInfo info{};
+        info.sampler     = s_CubemapSampler;
+        info.imageView   = s_IrradianceView;
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        return info;
+    }
 
-        for (int face = 0; face < 6; face++) {
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGB16F,
-                         size, size, 0, GL_RGB, GL_FLOAT, nullptr);
-        }
+    VkDescriptorImageInfo IBL::GetPrefilterDescriptorInfo() {
+        VkDescriptorImageInfo info{};
+        info.sampler     = s_CubemapSampler;
+        info.imageView   = s_PrefilterView;
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        return info;
+    }
 
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
-
-        // Fill mip levels with progressively blurred sky colors
-        glm::vec3 skyAvg(0.35f, 0.5f, 0.75f);
-
-        for (int mip = 0; mip < maxMipLevels; mip++) {
-            int mipSize = size >> mip;
-            if (mipSize < 1) mipSize = 1;
-
-            float roughness = float(mip) / float(maxMipLevels - 1);
-            // Blur toward average as roughness increases
-            glm::vec3 skyTop = glm::mix(glm::vec3(0.2f, 0.4f, 0.8f), skyAvg, roughness);
-            glm::vec3 skyHorizon = glm::mix(glm::vec3(0.6f, 0.7f, 0.9f), skyAvg, roughness);
-
-            for (int face = 0; face < 6; face++) {
-                std::vector<float> data(mipSize * mipSize * 3);
-                for (int y = 0; y < mipSize; y++) {
-                    for (int x = 0; x < mipSize; x++) {
-                        float t = (face == 2) ? 1.0f : (face == 3) ? -0.5f :
-                                  (float(y) / float(mipSize) - 0.5f) * -2.0f;
-
-                        glm::vec3 color = (t > 0.0f) ?
-                            glm::mix(skyHorizon, skyTop, t * 0.5f) :
-                            glm::mix(skyHorizon, skyAvg * 0.3f, -t);
-
-                        int idx = (y * mipSize + x) * 3;
-                        data[idx] = color.r;
-                        data[idx + 1] = color.g;
-                        data[idx + 2] = color.b;
-                    }
-                }
-                glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mip, GL_RGB16F,
-                             mipSize, mipSize, 0, GL_RGB, GL_FLOAT, data.data());
-            }
-        }
-
-        GE_CORE_DEBUG("IBL: Prefilter map generated ({}x{}, {} mips)", size, size, maxMipLevels);
+    VkDescriptorImageInfo IBL::GetBRDFLUTDescriptorInfo() {
+        VkDescriptorImageInfo info{};
+        info.sampler     = s_LUTSampler;
+        info.imageView   = s_BRDFLUTView;
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        return info;
     }
 
     void IBL::LoadEnvironment(const std::string& hdrPath) {
-        // TODO: Load HDR equirectangular image, convert to cubemap,
-        // then regenerate irradiance and prefilter maps via GPU convolution.
-        // For now, the procedural sky is used.
-        GE_CORE_WARN("IBL::LoadEnvironment not yet implemented, using procedural sky");
+        GE_CORE_WARN("IBL::LoadEnvironment('{}') not yet implemented; using procedural sky", hdrPath);
     }
 
-}
+} // namespace GameEngine

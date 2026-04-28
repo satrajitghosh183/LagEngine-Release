@@ -7,7 +7,7 @@
 
 #include <glm/glm.hpp>
 #include <vector>
-#include "glad/glad.h"
+#include <cstdint>
 #include "VertexData.h"
 
 class AABB {
@@ -105,7 +105,7 @@ public:
 
     void updateWithVertexData(VertexData &vertexData, glm::mat4 worldMatrix) {
         // convert all positions to world space
-        std::vector<GLfloat> positions = vertexData.positions;
+        std::vector<float> positions = vertexData.positions;
         _min = glm::vec3(std::numeric_limits<float>::max());
         _max = -_min;
 

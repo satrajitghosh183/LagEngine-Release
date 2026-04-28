@@ -8,15 +8,15 @@
 #include <vector>
 #include <iostream>
 #include <algorithm>
-#include "glad/glad.h"
+#include <cstdint>
 #include "utils.h"
 
 struct VertexData {
-    std::vector<GLfloat> positions{};
-    std::vector<GLfloat> normals{};
-    std::vector<GLfloat> uvs{};
-    std::vector<GLfloat> colors{};
-    std::vector<GLint> indices{};
+    std::vector<float> positions{};
+    std::vector<float> normals{};
+    std::vector<float> uvs{};
+    std::vector<float> colors{};
+    std::vector<int32_t> indices{};
 
     void debugPositions() {
         std::cout << "Positions: " << std::endl;
@@ -30,6 +30,9 @@ struct VertexData {
         if (normals.empty()) {
             normals.resize(positions.size());
         }
+        // Zero out normals before accumulating
+        std::fill(normals.begin(), normals.end(), 0.0f);
+
         for (int i = 0; i < indices.size(); i += 3) {
             auto index1 = indices[i];
             auto index2 = indices[i + 1];
@@ -75,24 +78,24 @@ struct VertexData {
      * @param prunedTriangleIndicesSubset
      * @see See page 5 of original HPBD paper for the description of the algorithm
      */
-    void subset(std::vector<GLint> &originalTriangleIndices, std::vector<GLint> &coarseVertexIndices,
-                std::vector<GLint> &closestCoarseVertexIndices, std::vector<GLint> &prunedTriangleIndicesSubset) {
+    void subset(std::vector<int32_t> &originalTriangleIndices, std::vector<int32_t> &coarseVertexIndices,
+                std::vector<int32_t> &closestCoarseVertexIndices, std::vector<int32_t> &prunedTriangleIndicesSubset) {
         int k = 2;
         unsigned long nbTotalVertices = positions.size() / 3;
 
         // All vertices of given triangulation are first marked as coarse
         // In the case of using an already simplified triangulation, not all vertices will be marked as coarse
         std::vector<bool> markedAsCoarse(nbTotalVertices, false);
-        for (GLint index: originalTriangleIndices) {
+        for (int32_t index: originalTriangleIndices) {
             markedAsCoarse[index] = true;
         }
 
         // for each vertex, we store the indices of its neighbors
-        std::vector<std::vector<GLint>> neighbors(nbTotalVertices, std::vector<GLint>());
+        std::vector<std::vector<int32_t>> neighbors(nbTotalVertices, std::vector<int32_t>());
         for (unsigned int i = 0; i < originalTriangleIndices.size(); i += 3) {
-            GLint index0 = originalTriangleIndices[i];
-            GLint index1 = originalTriangleIndices[i + 1];
-            GLint index2 = originalTriangleIndices[i + 2];
+            int32_t index0 = originalTriangleIndices[i];
+            int32_t index1 = originalTriangleIndices[i + 1];
+            int32_t index2 = originalTriangleIndices[i + 2];
 
             neighbors[index0].push_back(index1);
             neighbors[index0].push_back(index2);
@@ -139,12 +142,12 @@ struct VertexData {
             }
         }
 
-        for (GLint i = 0; i < nbTotalVertices; i++) {
+        for (int32_t i = 0; i < nbTotalVertices; i++) {
             if (markedAsCoarse[i]) coarseVertexIndices.push_back(i);
         }
 
         closestCoarseVertexIndices.resize(nbTotalVertices, -1);
-        for (GLint i = 0; i < nbTotalVertices; i++) {
+        for (int32_t i = 0; i < nbTotalVertices; i++) {
             if (markedAsCoarse[i]) {
                 closestCoarseVertexIndices[i] = i;
                 continue;
@@ -177,16 +180,16 @@ struct VertexData {
         }
 
         // Triangulate coarse vertices using the closest coarse vertex (garbage triangles will be generated, so it needs pruning afterward)
-        std::vector<GLint> rawTriangleIndicesSubset;
+        std::vector<int32_t> rawTriangleIndicesSubset;
         for (int index: indices) {
             rawTriangleIndicesSubset.push_back(closestCoarseVertexIndices[index]);
         }
 
         // prune triangles
         for (unsigned int i = 0; i < rawTriangleIndicesSubset.size(); i += 3) {
-            GLint index0 = rawTriangleIndicesSubset[i];
-            GLint index1 = rawTriangleIndicesSubset[i + 1];
-            GLint index2 = rawTriangleIndicesSubset[i + 2];
+            int32_t index0 = rawTriangleIndicesSubset[i];
+            int32_t index1 = rawTriangleIndicesSubset[i + 1];
+            int32_t index2 = rawTriangleIndicesSubset[i + 2];
 
             // if any of the vertices could not be substituted to a coarse vertex, skip the triangle
             if (index0 == -1 || index1 == -1 || index2 == -1) continue;
@@ -205,9 +208,9 @@ struct VertexData {
      * @return
      */
     VertexData simplify() {
-        std::vector<GLint> coarseVertexIndices;
-        std::vector<GLint> closestCoarseVertexIndices;
-        std::vector<GLint> prunedIndicesSubset;
+        std::vector<int32_t> coarseVertexIndices;
+        std::vector<int32_t> closestCoarseVertexIndices;
+        std::vector<int32_t> prunedIndicesSubset;
 
         subset(indices, coarseVertexIndices, closestCoarseVertexIndices, prunedIndicesSubset);
 

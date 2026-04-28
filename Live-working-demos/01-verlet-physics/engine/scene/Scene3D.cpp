@@ -3,58 +3,40 @@
 
 #include <cstdlib>
 #include <ctime>
-#include <glm/gtc/constants.hpp> // For pi constants if needed
-#include <GLFW/glfw3.h>  // 👈 Add this line
+#include <cmath>
+#include <glm/gtc/constants.hpp>
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 
 namespace engine::scene {
 
-Scene3D::Scene3D(float aspectRatio) 
+Scene3D::Scene3D(float aspectRatio)
     : clothWidth(30), clothHeight(30)
 {
-    // Initialize random seed once
     std::srand(static_cast<unsigned int>(std::time(nullptr)));
 
     camera = std::make_shared<engine::graphics::Camera>(45.0f, aspectRatio, 0.1f, 100.0f);
     camera->setPosition(glm::vec3(0.0f, 1.5f, 5.0f));
     camera->setTarget(glm::vec3(0.0f, 1.0f, 0.0f));
 
-    clothShader = std::make_shared<engine::graphics::Shader>("shaders/cloth.vert", "shaders/cloth.frag");
-    ballShader = std::make_shared<engine::graphics::Shader>("shaders/ball.vert", "shaders/ball.frag");
-    clothTexture = std::make_shared<engine::graphics::Texture2D>("shaders/cloth_weave.png");
-
     physicsWorld = std::make_shared<engine::physics::PhysicsWorld3D>();
 
-    // // Material properties
-    // clothMaterial.ambient = glm::vec3(0.2f, 0.2f, 0.2f);
-    // clothMaterial.diffuse = glm::vec3(0.6f, 0.5f, 0.4f);
-    // clothMaterial.specular = glm::vec3(0.2f, 0.2f, 0.2f);
-    // clothMaterial.shininess = 32.0f;
-    // Material properties for a more attractive cloth
-    clothMaterial.ambient = glm::vec3(0.2f, 0.2f, 0.2f);        // Darker ambient for depth
-    clothMaterial.diffuse = glm::vec3(0.3f, 0.5f, 0.8f);        // Blue-ish color (or try other colors)
-    clothMaterial.specular = glm::vec3(0.5f, 0.5f, 0.5f);       // More prominent highlights
-    clothMaterial.shininess = 16.0f;                            // Less concentrated highlights (was 32.0f)
+    clothMaterial.ambient = glm::vec3(0.2f, 0.2f, 0.2f);
+    clothMaterial.diffuse = glm::vec3(0.3f, 0.5f, 0.8f);
+    clothMaterial.specular = glm::vec3(0.5f, 0.5f, 0.5f);
+    clothMaterial.shininess = 16.0f;
 
-    // // Light properties
-    // sceneLight.position = glm::vec3(5.0f, 5.0f, 5.0f);
-    // sceneLight.ambient = glm::vec3(0.2f, 0.2f, 0.2f);
-    // sceneLight.diffuse = glm::vec3(0.8f, 0.8f, 0.8f);
-    // sceneLight.specular = glm::vec3(1.0f, 1.0f, 1.0f);
+    sceneLight.position = glm::vec3(2.0f, 5.0f, 3.0f);
+    sceneLight.ambient = glm::vec3(0.2f, 0.2f, 0.3f);
+    sceneLight.diffuse = glm::vec3(1.0f, 0.9f, 0.8f);
+    sceneLight.specular = glm::vec3(1.0f, 1.0f, 1.0f);
 
-
-        // Light properties for better illumination
-    sceneLight.position = glm::vec3(2.0f, 5.0f, 3.0f);          // Reposition light for better shadows
-    sceneLight.ambient = glm::vec3(0.2f, 0.2f, 0.3f);           // Slightly blue-tinted ambient
-    sceneLight.diffuse = glm::vec3(1.0f, 0.9f, 0.8f);           // Warm-tinted main light
-    sceneLight.specular = glm::vec3(1.0f, 1.0f, 1.0f);          // Keep bright highlights
     // Cloth setup
     auto cloth = std::make_shared<engine::physics::ClothSolver3D>(
         *physicsWorld,
         clothWidth, clothHeight,
         0.1f,
-        0.3f,    // Structural stiffness
-        0.4f,    // Shear stiffness
-        0.3f     // Bend stiffness
+        0.3f, 0.4f, 0.3f
     );
 
     cloth->createCloth(
@@ -64,17 +46,24 @@ Scene3D::Scene3D(float aspectRatio)
     );
     physicsWorld->addCloth(cloth);
 
-    // Optional ball (you can remove this if you only want cloth)
     auto ball = std::make_shared<engine::objects::Ball3D>(glm::vec3(0.0f, 1.5f, 0.0f), 0.3f);
     ball->applyForce(glm::vec3(0.0f, -9.81f, 0.0f));
     physicsWorld->addBall(ball);
 
-    // Cloth mesh
-    clothMesh = std::make_shared<engine::graphics::Mesh3D>();
-    std::vector<engine::graphics::Vertex3D> vertices;
-    std::vector<unsigned int> indices;
-    engine::graphics::MeshGenerator3D::generateClothMesh(clothWidth, clothHeight, cloth->getParticles(), vertices, indices);
-    clothMesh->uploadData(vertices, indices);
+    // Build initial cloth mesh data
+    {
+        const auto& particles = cloth->getParticles();
+        std::vector<engine::graphics::Vertex3D> verts;
+        std::vector<unsigned int> indices;
+        engine::graphics::MeshGenerator3D::generateClothMesh(clothWidth, clothHeight, particles, verts, indices);
+
+        clothVertices.resize(verts.size());
+        for (size_t i = 0; i < verts.size(); ++i) {
+            clothVertices[i].position = verts[i].position;
+            clothVertices[i].normal = verts[i].normal;
+        }
+        clothIndices = indices;
+    }
 }
 
 void Scene3D::update(float dt) {
@@ -84,15 +73,15 @@ void Scene3D::update(float dt) {
         auto cloth = physicsWorld->getCloths()[0];
         const auto& particles = cloth->getParticles();
 
-        // Wind Force (Procedural)
+        // Wind force
         float windStrength = 1.0f;
+        double t = glfwGetTime();
         glm::vec3 windDir = glm::normalize(glm::vec3(
-            0.5f * std::sin(glfwGetTime()),
+            0.5f * std::sin((float)t),
             0.0f,
-            0.5f * std::cos(glfwGetTime())
+            0.5f * std::cos((float)t)
         ));
 
-        // Flutter randomness
         float flutterStrength = 0.05f;
 
         for (auto& particle : particles) {
@@ -108,16 +97,11 @@ void Scene3D::update(float dt) {
             }
         }
 
-        // Update vertices
-        std::vector<engine::graphics::Vertex3D> updatedVertices(particles.size());
-
+        // Update vertex data
+        clothVertices.resize(particles.size());
         for (size_t i = 0; i < particles.size(); ++i) {
-            updatedVertices[i].position = particles[i]->getPosition();
-            updatedVertices[i].normal = glm::vec3(0.0f);
-            updatedVertices[i].texCoord = glm::vec2(
-                (i % (clothWidth + 1)) / float(clothWidth),
-                (i / (clothWidth + 1)) / float(clothHeight)
-            );
+            clothVertices[i].position = particles[i]->getPosition();
+            clothVertices[i].normal = glm::vec3(0.0f);
         }
 
         int w = clothWidth + 1;
@@ -131,62 +115,30 @@ void Scene3D::update(float dt) {
                 int i3 = i2 + 1;
 
                 glm::vec3 normal1 = glm::normalize(glm::cross(
-                    updatedVertices[i2].position - updatedVertices[i0].position,
-                    updatedVertices[i1].position - updatedVertices[i0].position
+                    clothVertices[i2].position - clothVertices[i0].position,
+                    clothVertices[i1].position - clothVertices[i0].position
                 ));
                 glm::vec3 normal2 = glm::normalize(glm::cross(
-                    updatedVertices[i3].position - updatedVertices[i1].position,
-                    updatedVertices[i2].position - updatedVertices[i1].position
+                    clothVertices[i3].position - clothVertices[i1].position,
+                    clothVertices[i2].position - clothVertices[i1].position
                 ));
 
-                updatedVertices[i0].normal += normal1;
-                updatedVertices[i2].normal += normal1;
-                updatedVertices[i1].normal += normal1;
+                clothVertices[i0].normal += normal1;
+                clothVertices[i2].normal += normal1;
+                clothVertices[i1].normal += normal1;
 
-                updatedVertices[i1].normal += normal2;
-                updatedVertices[i2].normal += normal2;
-                updatedVertices[i3].normal += normal2;
+                clothVertices[i1].normal += normal2;
+                clothVertices[i2].normal += normal2;
+                clothVertices[i3].normal += normal2;
             }
         }
 
-        for (auto& v : updatedVertices) {
+        for (auto& v : clothVertices) {
             if (glm::length(v.normal) > 1e-6f)
                 v.normal = glm::normalize(v.normal);
             else
-                v.normal = glm::vec3(0.0f, 1.0f, 0.0f); // fallback
+                v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
         }
-
-        clothMesh->updateVertices(updatedVertices);
-    }
-}
-
-void Scene3D::render() const {
-    if (clothShader) {
-        clothTexture->bind();
-        clothShader->bind();
-
-        clothShader->setUniformMat4("model", glm::mat4(1.0f));
-        clothShader->setUniformMat4("view", camera->getViewMatrix());
-        clothShader->setUniformMat4("projection", camera->getProjectionMatrix());
-
-        clothShader->setUniformVec3("light.position", sceneLight.position);
-        clothShader->setUniformVec3("light.ambient", sceneLight.ambient);
-        clothShader->setUniformVec3("light.diffuse", sceneLight.diffuse);
-        clothShader->setUniformVec3("light.specular", sceneLight.specular);
-
-        clothShader->setUniformVec3("viewPos", camera->getPosition());
-
-        clothShader->setUniformVec3("material.ambient", clothMaterial.ambient);
-        clothShader->setUniformVec3("material.diffuse", clothMaterial.diffuse);
-        clothShader->setUniformVec3("material.specular", clothMaterial.specular);
-        clothShader->setUniformFloat("material.shininess", clothMaterial.shininess);
-
-        clothShader->setUniformInt("clothTexture", 0);
-
-        clothMesh->draw();
-
-        clothShader->unbind();
-        clothTexture->unbind();
     }
 }
 
@@ -198,4 +150,4 @@ std::shared_ptr<engine::graphics::Camera> Scene3D::getCamera() {
     return camera;
 }
 
-} // namespace
+} // namespace engine::scene

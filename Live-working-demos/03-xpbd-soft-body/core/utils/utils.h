@@ -8,12 +8,12 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <cstdint>
 #include <glm/vec3.hpp>
 #include <iostream>
 #include <glm/gtc/random.hpp>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/glm.hpp>
-#include "glad/glad.h"
 #include "Eigen/Core"
 #include "Eigen/Geometry"
 #include "PickResult.h"
@@ -24,12 +24,6 @@
  * @param stringBuffer
  */
 void loadFileToBuffer(const char *filename, std::string &stringBuffer);
-
-GLuint loadTextureFromFileToGPU(const char *filename);
-
-void writeTextureToPPM(GLuint textureHandle, const char *filename);
-
-void writeDepthTextureToPPM(GLuint textureHandle, const char *filename);
 
 std::string toString(glm::vec3 vec);
 
@@ -266,10 +260,10 @@ public:
         });
     }
 
-    static bool isMergedTriangulationClosed(std::vector<int> &indices, std::vector<GLfloat> &positions) {
+    static bool isMergedTriangulationClosed(std::vector<int32_t> &indices, std::vector<float> &positions) {
         // make a copy of the indices and the positions
-        std::vector<int> indicesCopy = std::vector<int>(indices);
-        std::vector<GLfloat> positionsCopy = std::vector<GLfloat>(positions);
+        std::vector<int> indicesCopy(indices.begin(), indices.end());
+        std::vector<float> positionsCopy(positions);
 
         // merge vertices that share the same position
         MergeVertices(positionsCopy, indicesCopy);
@@ -303,7 +297,7 @@ public:
         }
     }
 
-    static PickResult PickWithRay(std::vector<int> &indices, std::vector<GLfloat> &positions, glm::vec3 rayOrigin, glm::vec3 rayDirection, glm::mat4 worldMatrix) {
+    static PickResult PickWithRay(std::vector<int32_t> &indices, std::vector<float> &positions, glm::vec3 rayOrigin, glm::vec3 rayDirection, glm::mat4 worldMatrix) {
         std::vector<PickResult> results{};
 
         for(int i = 0; i < indices.size(); i += 3) {

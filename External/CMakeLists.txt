@@ -1,6 +1,6 @@
 # External Dependencies
 
-# GLFW
+# GLFW (used for windowing with both OpenGL and Vulkan)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -10,7 +10,45 @@ add_subdirectory(glfw)
 add_library(glm INTERFACE)
 target_include_directories(glm INTERFACE glm)
 
-# ImGui
+# Vulkan SDK
+find_package(Vulkan REQUIRED)
+message(STATUS "Vulkan found: ${Vulkan_INCLUDE_DIRS}")
+message(STATUS "Vulkan libraries: ${Vulkan_LIBRARIES}")
+
+# Vulkan::Vulkan is created at root CMakeLists.txt scope.
+# This block is intentionally empty — find_package was hoisted up.
+
+# Vulkan Memory Allocator (VMA) - fetched via FetchContent
+include(FetchContent)
+FetchContent_Declare(
+    vma
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+    GIT_TAG v3.1.0
+)
+FetchContent_MakeAvailable(vma)
+
+# shaderc for runtime GLSL -> SPIR-V compilation
+# Use the one bundled with the Vulkan SDK if available
+if(Vulkan_shaderc_combined_FOUND OR TARGET Vulkan::shaderc_combined)
+    message(STATUS "Using Vulkan SDK shaderc")
+else()
+    # Fallback: look for system shaderc
+    find_library(SHADERC_LIB shaderc_combined PATHS
+        $ENV{VULKAN_SDK}/lib
+        $ENV{VULKAN_SDK}/Lib
+    )
+    if(SHADERC_LIB)
+        add_library(shaderc_combined STATIC IMPORTED)
+        set_target_properties(shaderc_combined PROPERTIES
+            IMPORTED_LOCATION ${SHADERC_LIB}
+        )
+        message(STATUS "Found shaderc: ${SHADERC_LIB}")
+    else()
+        message(WARNING "shaderc not found - runtime shader compilation will not be available")
+    endif()
+endif()
+
+# ImGui (with Vulkan + GLFW backends)
 add_library(imgui STATIC
     imgui/imgui.cpp
     imgui/imgui_demo.cpp
@@ -18,13 +56,13 @@ add_library(imgui STATIC
     imgui/imgui_tables.cpp
     imgui/imgui_widgets.cpp
     imgui/backends/imgui_impl_glfw.cpp
-    imgui/backends/imgui_impl_opengl3.cpp
+    imgui/backends/imgui_impl_vulkan.cpp
 )
-target_include_directories(imgui PUBLIC 
+target_include_directories(imgui PUBLIC
     imgui
     imgui/backends
 )
-target_link_libraries(imgui PUBLIC glfw)
+target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)
 
 # nlohmann_json (header-only)
 add_library(nlohmann_json INTERFACE)
@@ -34,10 +72,6 @@ add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
 # stb_image
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image INTERFACE stb_image)
-
-# GLAD
-add_library(glad STATIC glad/src/glad.c)
-target_include_directories(glad PUBLIC glad/include)
 
 # Assimp (enabled for Linux/WSL)
 if(UNIX OR WIN32)
@@ -97,4 +131,3 @@ if(UNIX OR WIN32)
     set(ALSOFT_INSTALL_CONFIG OFF CACHE BOOL "" FORCE)
     add_subdirectory(openal-soft)
 endif()
-

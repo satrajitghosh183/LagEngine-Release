@@ -6,6 +6,7 @@
 #define FEATHERGL_MESHBUILDER_H
 
 #include <iostream>
+#include <cstdint>
 #include "Mesh.h"
 #include "Scene.h"
 
@@ -291,11 +292,11 @@ public:
     }
 
     static std::shared_ptr<Mesh> makeUvSphere(const char *name, Scene &scene, int resolution) {
-        std::vector<GLfloat> positions;
-        std::vector<GLfloat> normals;
-        std::vector<GLfloat> uvs;
-        std::vector<GLint> indices;
-        std::vector<GLfloat> colors;
+        std::vector<float> positions;
+        std::vector<float> normals;
+        std::vector<float> uvs;
+        std::vector<int32_t> indices;
+        std::vector<float> colors;
 
         const float PI = std::acos(-1.0f);
 
@@ -447,10 +448,10 @@ public:
 
     static std::shared_ptr<Mesh> makePlane(const char *name, Scene &scene, unsigned int nbSubdivisions) {
         VertexData vertexData = VertexData();
-        vertexData.positions = std::vector<GLfloat>(nbSubdivisions * nbSubdivisions * 3);
-        vertexData.indices = std::vector<GLint>((nbSubdivisions - 1) * (nbSubdivisions - 1) * 3 * 2);
-        vertexData.uvs = std::vector<GLfloat>(nbSubdivisions * nbSubdivisions * 2);
-        vertexData.normals = std::vector<GLfloat>(nbSubdivisions * nbSubdivisions * 3);
+        vertexData.positions = std::vector<float>(nbSubdivisions * nbSubdivisions * 3);
+        vertexData.indices = std::vector<int32_t>((nbSubdivisions - 1) * (nbSubdivisions - 1) * 3 * 2);
+        vertexData.uvs = std::vector<float>(nbSubdivisions * nbSubdivisions * 2);
+        vertexData.normals = std::vector<float>(nbSubdivisions * nbSubdivisions * 3);
 
         float size = 1.0f;
 
@@ -563,11 +564,11 @@ public:
     static std::shared_ptr<Mesh> FromObjFile(std::string filePath, Scene &scene) {
         std::ifstream file(filePath);
         std::string line;
-        std::vector<GLfloat> positions;
-        std::vector<GLfloat> normals;
-        std::vector<GLfloat> uvs;
-        std::vector<GLint> indices;
-        std::vector<GLfloat> colors;
+        std::vector<float> positions;
+        std::vector<float> normals;
+        std::vector<float> uvs;
+        std::vector<int32_t> indices;
+        std::vector<float> colors;
 
         while (std::getline(file, line)) {
             std::istringstream iss(line);

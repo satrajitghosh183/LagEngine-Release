@@ -5,6 +5,7 @@
 #ifndef FEATHERGL_PHYSICSBODY_H
 #define FEATHERGL_PHYSICSBODY_H
 
+#include <cstdint>
 #include "Mesh.h"
 #include "Particle.h"
 #include "Constraint.h"
@@ -35,27 +36,27 @@ public:
     };
 
     void buildParticleHierarchy(int nbLevels) {
-        std::vector<std::vector<GLint>> triangulations;
+        std::vector<std::vector<int32_t>> triangulations;
         triangulations.push_back(mesh()->vertexData().indices);
 
-        std::vector<std::vector<GLint>> particleIndicesPerLevel;
-        particleIndicesPerLevel.push_back(std::vector<GLint>());
+        std::vector<std::vector<int32_t>> particleIndicesPerLevel;
+        particleIndicesPerLevel.push_back(std::vector<int32_t>());
         for (int i = 0; i < _particles.size(); i++) {
             particleIndicesPerLevel[0].push_back(i);
         }
 
-        std::vector<std::vector<GLint>> closestCoarseVertexIndicesPerLevel;
-        closestCoarseVertexIndicesPerLevel.push_back(std::vector<GLint>());
+        std::vector<std::vector<int32_t>> closestCoarseVertexIndicesPerLevel;
+        closestCoarseVertexIndicesPerLevel.push_back(std::vector<int32_t>());
         for (int i = 0; i < _particles.size(); i++) {
             closestCoarseVertexIndicesPerLevel[0].push_back(i);
         }
 
         for (unsigned int level = 1; level <= nbLevels; level++) {
-            std::vector<GLint> coarseVertexIndices;
-            std::vector<GLint> closestCoarseVertexIndices;
-            std::vector<GLint> newTriangulation;
+            std::vector<int32_t> coarseVertexIndices;
+            std::vector<int32_t> closestCoarseVertexIndices;
+            std::vector<int32_t> newTriangulation;
 
-            std::vector<GLint> previousTriangulation = triangulations[triangulations.size() - 1];
+            std::vector<int32_t> previousTriangulation = triangulations[triangulations.size() - 1];
 
             mesh()->vertexData().subset(previousTriangulation, coarseVertexIndices, closestCoarseVertexIndices,
                                         newTriangulation);
@@ -92,7 +93,7 @@ public:
                     // the particle does not belong in this coarser level, we have to change it
 
                     // find the closest particle in the current level
-                    GLint closestParticleIndex = closestCoarseVertexIndicesPerLevel[level][particleIndex];
+                    int32_t closestParticleIndex = closestCoarseVertexIndicesPerLevel[level][particleIndex];
                     if (closestParticleIndex == -1) {
                         shouldBeKept = false;
                         continue;
@@ -226,11 +227,11 @@ public:
         }
     }
 
-    std::vector<std::vector<GLint>> &trianglesPerLevel() {
+    std::vector<std::vector<int32_t>> &trianglesPerLevel() {
         return _trianglesPerLevel;
     }
 
-    std::vector<std::vector<GLint>> &particleIndicesPerLevel() {
+    std::vector<std::vector<int32_t>> &particleIndicesPerLevel() {
         return _particleIndicesPerLevel;
     }
 
@@ -262,8 +263,8 @@ protected:
 private:
     // HPBD
     std::vector<std::vector<std::shared_ptr<DistanceConstraint>>> _distanceConstraintsPerLevel;
-    std::vector<std::vector<GLint>> _trianglesPerLevel;
-    std::vector<std::vector<GLint>> _particleIndicesPerLevel;
+    std::vector<std::vector<int32_t>> _trianglesPerLevel;
+    std::vector<std::vector<int32_t>> _particleIndicesPerLevel;
     int _collisionLevel = 0;
 
     std::vector<std::shared_ptr<FixedConstraint>> _fixedConstraints;

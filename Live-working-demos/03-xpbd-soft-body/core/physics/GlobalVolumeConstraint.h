@@ -7,12 +7,12 @@
 
 #include <glm/geometric.hpp>
 #include <iostream>
+#include <cstdint>
 #include "Constraint.h"
-#include "glad/glad.h"
 
 class GlobalVolumeConstraint : public Constraint {
 public:
-    GlobalVolumeConstraint(std::vector<std::shared_ptr<Particle>> particles, std::vector<GLint> indices,
+    GlobalVolumeConstraint(std::vector<std::shared_ptr<Particle>> particles, std::vector<int32_t> indices,
                            float pressure, float compliance) : Constraint(
             particles, compliance, EQUALITY), _pressure(pressure), _indices(indices) {
 
@@ -82,7 +82,7 @@ private:
 
     float _restVolume{};
     float _pressure{};
-    std::vector<GLint> _indices;
+    std::vector<int32_t> _indices;
 };
 
 #endif //FEATHERGL_GLOBALVOLUMECONSTRAINT_H

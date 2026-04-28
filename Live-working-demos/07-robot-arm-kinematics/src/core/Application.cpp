@@ -1,14 +1,16 @@
-﻿#include <iostream>
+#include <iostream>
 #include <sstream>
+#include <array>
+#include <cstring>
+#include <cmath>
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
+#include "imgui_impl_vulkan.h"
 
 #include "ImGuizmo.h"
 
-#define GLEW_STATIC
-#include "GL/glew.h"
+#define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
 
 #include "Application.hpp"
@@ -20,24 +22,90 @@
 
 using namespace Eigen;
 
-namespace {
-	enum VertexShaderAttributeLocations
-	{
-		ATTRIB_POSITION = 0,
-		ATTRIB_NORMAL = 1,
-		ATTRIB_COLOR = 2,
-		ATTRIB_JOINTS1 = 3,
-		ATTRIB_JOINTS2 = 4,
-		ATTRIB_WEIGHTS1 = 5,
-		ATTRIB_WEIGHTS2 = 6
-	};
+// ── Embedded shaders (Vulkan / GLSL 450) ─────────────────────────────────────
+// The vertex shader receives pre-multiplied viewProj as a push constant (mat4, 64 bytes)
+// and lighting data packed into the remaining 48 bytes of push constant space.
+// Since model is identity for this demo, world pos = vertex pos.
+
+static const std::string kRobotVertShader = R"(
+#version 450
+
+layout(push_constant) uniform PushConstants {
+    mat4 viewProj;
+    vec4 lightPos;      // xyz = position, w = unused
+    vec4 viewPos;       // xyz = position, w = unused
+    vec4 lightColor;    // xyz = color, w = unused
+} pc;
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec4 aColor;
+
+layout(location = 0) out vec3 FragPos;
+layout(location = 1) out vec3 Normal;
+layout(location = 2) out vec4 vColor;
+
+void main()
+{
+    // Model matrix is identity, so FragPos = aPosition
+    FragPos = aPosition;
+    Normal = aNormal;
+    vColor = aColor;
+    gl_Position = pc.viewProj * vec4(aPosition, 1.0);
 }
+)";
+
+static const std::string kRobotFragShader = R"(
+#version 450
+
+layout(push_constant) uniform PushConstants {
+    mat4 viewProj;
+    vec4 lightPos;
+    vec4 viewPos;
+    vec4 lightColor;
+} pc;
+
+layout(location = 0) in vec3 FragPos;
+layout(location = 1) in vec3 Normal;
+layout(location = 2) in vec4 vColor;
+
+layout(location = 0) out vec4 FragColor;
+
+void main()
+{
+    vec3 lp = pc.lightPos.xyz;
+    vec3 vp = pc.viewPos.xyz;
+    vec3 lc = pc.lightColor.xyz;
+
+    // ambient
+    float ambientStrength = 0.2;
+    vec3 ambient = ambientStrength * lc;
+
+    // diffuse
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lp - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * lc;
+
+    // specular
+    float specularStrength = 0.3;
+    vec3 viewDir = normalize(vp - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 8);
+    vec3 specular = specularStrength * spec * lc;
+
+    vec3 result = (ambient + diffuse + specular) * vColor.xyz;
+    FragColor = vec4(result, vColor.w);
+}
+)";
+
+// ── Application ──────────────────────────────────────────────────────────────
 
 Application::Application():
 	drawmode_(DrawMode::MODE_MESH),
 	shading_toggle_(false),
 	shading_mode_changed_(false),
-	camera_(Vector3f(1, 0, 0), 4.0f, M_PI / 4, M_PI / 6)
+	camera_(Vector3f(1, 0, 0), 4.0f, static_cast<float>(M_PI / 4), static_cast<float>(M_PI / 6))
 {
 	robot_ = std::make_unique<Robot>("src/resources/params.txt", Vector3f(1, 0, 0));
 
@@ -47,42 +115,26 @@ Application::Application():
 }
 
 void Application::createWindow(int width, int height) {
-	// Init GLFW
-	glfwInit();
+	// Initialize VulkanBase with ImGui enabled
+	vkdemo::AppConfig config;
+	config.Title = "Robot Arm Simulator (Vulkan)";
+	config.Width = width;
+	config.Height = height;
+	config.EnableValidation = true;
+	config.EnableImGui = true;
 
-	// Set all the required options for GLFW
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-	glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
-	glfwWindowHint(GLFW_MAXIMIZED, GL_TRUE);
+	vkBase_.Init(config);
 
-
-	// Create a GLFWwindow object that we can use for GLFW's functions
-	window_ = glfwCreateWindow(width, height, "Robot Arm Simulator", nullptr, nullptr);
-	if (nullptr == window_)
-	{
-		std::cerr << "Failed to create GLFW window" << std::endl;
-		glfwTerminate();
-		exit(EXIT_FAILURE);
-	}
-	glfwMakeContextCurrent(window_);
-
-	glfwSetWindowUserPointer(window_, this);
+	GLFWwindow* window = vkBase_.GetWindow();
 
 	// Setup event handling
 	EventDispatcher::SetApplication(this);
-	glfwSetKeyCallback(window_, EventDispatcher::KeyboardCallback);
-	glfwSetCursorPosCallback(window_, EventDispatcher::MouseMovedCallback);
-	glfwSetMouseButtonCallback(window_, EventDispatcher::MouseButtonCallback);
-	glfwSetScrollCallback(window_, EventDispatcher::MouseScrolledCallback);
+	glfwSetKeyCallback(window, EventDispatcher::KeyboardCallback);
+	glfwSetCursorPosCallback(window, EventDispatcher::MouseMovedCallback);
+	glfwSetMouseButtonCallback(window, EventDispatcher::MouseButtonCallback);
+	glfwSetScrollCallback(window, EventDispatcher::MouseScrolledCallback);
 
-	// Imgui setup
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO();
-
+	// Style ImGui
 	{
 		ImGuiStyle* style = &ImGui::GetStyle();
 
@@ -134,35 +186,22 @@ void Application::createWindow(int width, int height) {
 		style->Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.25f, 1.00f, 0.00f, 0.43f);
 	}
 
-	ImGui_ImplGlfw_InitForOpenGL(window_, true);
-	ImGui_ImplOpenGL3_Init("#version 330");
+	// Create Vulkan graphics pipeline
+	createGraphicsPipeline();
 
-	// Set this to true so GLEW knows to use a modern approach to retrieving function pointers and extensions
-	glewExperimental = GL_TRUE;
-	// Initialize GLEW to setup the OpenGL Function pointers
-	if (GLEW_OK != glewInit())
-	{
-		std::cerr << "Failed to initialize GLEW" << std::endl;
-		glfwTerminate();
-		exit(EXIT_FAILURE);
-	}
-
-	// registe callback (old)
-	// glfwSetMouseButtonCallback(window_,
-	// 	[](GLFWwindow* w, int button, int action, int mods)
-	// 	{
-	// 		static_cast<Application*>(glfwGetWindowUserPointer(w))->mouseButtonCallback(w, button, action, mods);
-	// 	}
-	// );
-
-	initRendering();
+	// Handle swapchain recreation (pipeline depends on render pass)
+	vkBase_.OnResize = [this](int w, int h) {
+		(void)w; (void)h;
+		destroyGraphicsPipeline();
+		createGraphicsPipeline();
+	};
 }
 
 void Application::handleEvent(const Event& ev)
 {
 	camera_.handleEvent(ev);
-	
-	// handle right mouse clicks
+
+	// handle right mouse clicks for IK target
 	if (ev.type == EventType::KEY_DOWN && ev.key == GLFW_MOUSE_BUTTON_RIGHT)
 	{
 		setIkTarget();
@@ -170,84 +209,249 @@ void Application::handleEvent(const Event& ev)
 	}
 }
 
-void Application::initRendering()
+void Application::createGraphicsPipeline()
 {
-	// Create vertex attribute objects and buffers for vertex data.
-	glGenVertexArrays(1, &gl_.simple_vao);
-	glGenBuffers(1, &gl_.simple_vertex_buffer);
+	VkDevice device = vkBase_.GetDevice();
 
-	// Check for OpenGL errors.
-	checkGlErrors();
+	// Compile shaders from embedded GLSL strings
+	auto vertSPIRV = compileGLSLToSPIRV(kRobotVertShader, shaderc_vertex_shader, "robot.vert");
+	auto fragSPIRV = compileGLSLToSPIRV(kRobotFragShader, shaderc_fragment_shader, "robot.frag");
 
-	// Set up vertex attribute object
-	glBindVertexArray(gl_.simple_vao);
-	glBindBuffer(GL_ARRAY_BUFFER, gl_.simple_vertex_buffer);
-	glEnableVertexAttribArray(ATTRIB_POSITION);
-	glVertexAttribPointer(ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)0);
-	glEnableVertexAttribArray(ATTRIB_NORMAL);
-	glVertexAttribPointer(ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)offsetof(Vertex, normal));
-	glEnableVertexAttribArray(ATTRIB_COLOR);
-	glVertexAttribPointer(ATTRIB_COLOR, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)offsetof(Vertex, color));
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindVertexArray(0);
+	vertModule_ = vkBase_.CreateShaderModule(vertSPIRV);
+	fragModule_ = vkBase_.CreateShaderModule(fragSPIRV);
 
-	shader_ = std::make_unique<Shader>("simple_shader");
-	shader_->use();
+	// Shader stages
+	VkPipelineShaderStageCreateInfo vertStage{};
+	vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vertStage.module = vertModule_;
+	vertStage.pName = "main";
 
-	checkGlErrors();
+	VkPipelineShaderStageCreateInfo fragStage{};
+	fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragStage.module = fragModule_;
+	fragStage.pName = "main";
 
-	// Get the IDs of the shader programs and their uniform input locations from OpenGL.
-	gl_.simple_shader = shader_->ID;
-	gl_.model = glGetUniformLocation(gl_.simple_shader, "model");
-	gl_.view = glGetUniformLocation(gl_.simple_shader, "view");
-	gl_.projection = glGetUniformLocation(gl_.simple_shader, "projection");
-	gl_.lightPos = glGetUniformLocation(gl_.simple_shader, "lightPos");
-	gl_.viewPos = glGetUniformLocation(gl_.simple_shader, "viewPos");
-	gl_.lightColor = glGetUniformLocation(gl_.simple_shader, "lightColor");
-	gl_.objectColor = glGetUniformLocation(gl_.simple_shader, "objectColor");
+	VkPipelineShaderStageCreateInfo stages[] = {vertStage, fragStage};
 
-	checkGlErrors();
+	// Vertex input: position (vec3), normal (vec3), color (vec4)
+	VkVertexInputBindingDescription binding{};
+	binding.binding = 0;
+	binding.stride = sizeof(Vertex);  // 3+3+4 floats = 40 bytes
+	binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+	std::array<VkVertexInputAttributeDescription, 3> attrs{};
+	// position
+	attrs[0].binding = 0;
+	attrs[0].location = 0;
+	attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+	attrs[0].offset = offsetof(Vertex, position);
+	// normal
+	attrs[1].binding = 0;
+	attrs[1].location = 1;
+	attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+	attrs[1].offset = offsetof(Vertex, normal);
+	// color (vec4)
+	attrs[2].binding = 0;
+	attrs[2].location = 2;
+	attrs[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+	attrs[2].offset = offsetof(Vertex, color);
+
+	VkPipelineVertexInputStateCreateInfo vertexInput{};
+	vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInput.vertexBindingDescriptionCount = 1;
+	vertexInput.pVertexBindingDescriptions = &binding;
+	vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(attrs.size());
+	vertexInput.pVertexAttributeDescriptions = attrs.data();
+
+	// Input assembly
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+	// Viewport & scissor (dynamic)
+	VkPipelineViewportStateCreateInfo viewportState{};
+	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount = 1;
+	viewportState.scissorCount = 1;
+
+	// Rasterizer (fill mode)
+	VkPipelineRasterizationStateCreateInfo rasterizer{};
+	rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterizer.depthClampEnable = VK_FALSE;
+	rasterizer.rasterizerDiscardEnable = VK_FALSE;
+	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+	rasterizer.lineWidth = 1.0f;
+	rasterizer.cullMode = VK_CULL_MODE_NONE;  // no culling for robot parts
+	rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterizer.depthBiasEnable = VK_FALSE;
+
+	// Multisampling
+	VkPipelineMultisampleStateCreateInfo multisampling{};
+	multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampling.sampleShadingEnable = VK_FALSE;
+	multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+	// Depth stencil
+	VkPipelineDepthStencilStateCreateInfo depthStencil{};
+	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencil.depthTestEnable = VK_TRUE;
+	depthStencil.depthWriteEnable = VK_TRUE;
+	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+	depthStencil.depthBoundsTestEnable = VK_FALSE;
+	depthStencil.stencilTestEnable = VK_FALSE;
+
+	// Color blending (alpha blending enabled)
+	VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+	colorBlendAttachment.colorWriteMask =
+		VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachment.blendEnable = VK_TRUE;
+	colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+	VkPipelineColorBlendStateCreateInfo colorBlending{};
+	colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlending.logicOpEnable = VK_FALSE;
+	colorBlending.attachmentCount = 1;
+	colorBlending.pAttachments = &colorBlendAttachment;
+
+	// Dynamic state
+	VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+	VkPipelineDynamicStateCreateInfo dynamicState{};
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = 2;
+	dynamicState.pDynamicStates = dynamicStates;
+
+	// Push constant range: PushConstantData = 112 bytes
+	// (mat4=64 + 3*vec4=48 = 112, well within 128 byte minimum)
+	VkPushConstantRange pushRange{};
+	pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pushRange.offset = 0;
+	pushRange.size = sizeof(PushConstantData);
+
+	pipelineLayout_ = vkBase_.CreatePipelineLayout({}, {pushRange});
+
+	// Create fill pipeline
+	VkGraphicsPipelineCreateInfo pipelineCI{};
+	pipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipelineCI.stageCount = 2;
+	pipelineCI.pStages = stages;
+	pipelineCI.pVertexInputState = &vertexInput;
+	pipelineCI.pInputAssemblyState = &inputAssembly;
+	pipelineCI.pViewportState = &viewportState;
+	pipelineCI.pRasterizationState = &rasterizer;
+	pipelineCI.pMultisampleState = &multisampling;
+	pipelineCI.pDepthStencilState = &depthStencil;
+	pipelineCI.pColorBlendState = &colorBlending;
+	pipelineCI.pDynamicState = &dynamicState;
+	pipelineCI.layout = pipelineLayout_;
+	pipelineCI.renderPass = vkBase_.GetRenderPass();
+	pipelineCI.subpass = 0;
+
+	if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline_) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create fill graphics pipeline");
+
+	// Create wireframe pipeline variant
+	VkPipelineRasterizationStateCreateInfo wireRasterizer = rasterizer;
+	wireRasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+	wireRasterizer.lineWidth = 1.0f;
+	pipelineCI.pRasterizationState = &wireRasterizer;
+
+	if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &wireframePipeline_) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create wireframe graphics pipeline");
+}
+
+void Application::destroyGraphicsPipeline()
+{
+	VkDevice device = vkBase_.GetDevice();
+	vkDeviceWaitIdle(device);
+
+	if (pipeline_ != VK_NULL_HANDLE) {
+		vkDestroyPipeline(device, pipeline_, nullptr);
+		pipeline_ = VK_NULL_HANDLE;
+	}
+	if (wireframePipeline_ != VK_NULL_HANDLE) {
+		vkDestroyPipeline(device, wireframePipeline_, nullptr);
+		wireframePipeline_ = VK_NULL_HANDLE;
+	}
+	if (pipelineLayout_ != VK_NULL_HANDLE) {
+		vkDestroyPipelineLayout(device, pipelineLayout_, nullptr);
+		pipelineLayout_ = VK_NULL_HANDLE;
+	}
+	if (vertModule_ != VK_NULL_HANDLE) {
+		vkDestroyShaderModule(device, vertModule_, nullptr);
+		vertModule_ = VK_NULL_HANDLE;
+	}
+	if (fragModule_ != VK_NULL_HANDLE) {
+		vkDestroyShaderModule(device, fragModule_, nullptr);
+		fragModule_ = VK_NULL_HANDLE;
+	}
+}
+
+void Application::uploadVertexData(const std::vector<Vertex>& vertices)
+{
+	vertexCount_ = static_cast<uint32_t>(vertices.size());
+	if (vertexCount_ == 0) return;
+
+	VkDeviceSize bufferSize = sizeof(Vertex) * vertexCount_;
+
+	// Destroy old buffer if it exists and is too small
+	if (vertexBuffer_.Buffer != VK_NULL_HANDLE && vertexBuffer_.Size < bufferSize) {
+		// Need to wait for GPU to finish using the old buffer
+		vkDeviceWaitIdle(vkBase_.GetDevice());
+		vkBase_.DestroyBuffer(vertexBuffer_);
+		vertexBuffer_ = {};
+	}
+
+	if (vertexBuffer_.Buffer == VK_NULL_HANDLE) {
+		// Create host-visible vertex buffer (re-uploaded each frame)
+		vertexBuffer_ = vkBase_.CreateBuffer(
+			bufferSize,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	}
+
+	vkBase_.CopyToBuffer(vertexBuffer_, vertices.data(), bufferSize);
 }
 
 void Application::run(void) {
-	assert(window_ != nullptr);
-
-	bool show_demo_window = true;
-	bool show_another_window = false;
-	ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-
 	std::vector<DhParam> robot_params = robot_->getDhParams();
 
-	float last_time = glfwGetTime();
+	float last_time = static_cast<float>(glfwGetTime());
 	float curr_time;
 
 	// program loop
-	while (!glfwWindowShouldClose(window_))
+	while (true)
 	{
-		glfwPollEvents();
+		if (!vkBase_.BeginFrame())
+			break;
 
 		// calculate time delta
-		curr_time = glfwGetTime();
+		curr_time = static_cast<float>(glfwGetTime());
 		float dt = curr_time - last_time;
 		last_time = curr_time;
 
 		// ============= ImGui  ================
 		{
 			using namespace ImGui;
-			ImGui_ImplOpenGL3_NewFrame();
-			ImGui_ImplGlfw_NewFrame();
-			NewFrame();
+			vkBase_.ImGuiNewFrame();
 			ImGuizmo::BeginFrame();
 
 			// ImGuizmo
 			ImGuizmo::SetOrthographic(false);
 			ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
 
-			int screenWidth, screenHeight;
-			glfwGetFramebufferSize(window_, &screenWidth, &screenHeight);
-			// glViewport(0, 0, screenWidth, screenHeight);
+			int screenWidth = vkBase_.GetWidth();
+			int screenHeight = vkBase_.GetHeight();
 
-			ImGuizmo::SetRect(0, 0, screenWidth, screenHeight);
+			ImGuizmo::SetRect(0, 0, static_cast<float>(screenWidth), static_cast<float>(screenHeight));
 			Eigen::Matrix4f robot_transform = robot_->getWorldToBase().matrix();
 			Eigen::Matrix4f camera_view = camera_.getViewMatrix();
 			Eigen::Matrix4f camera_projection = camera_.getProjectionMatrix();
@@ -266,7 +470,7 @@ void Application::run(void) {
 			}
 
 			Begin("Joint angle controls:");
-			for (int i = 0; i < robot_->getNumJoints(); i++) {
+			for (int i = 0; i < static_cast<int>(robot_->getNumJoints()); i++) {
 				PushID(i);
 				Text("joint %d", i);
 				SameLine();
@@ -281,9 +485,9 @@ void Application::run(void) {
 			End();
 
 			Begin("Joint PID controller gains:");
-			SliderFloat("P", &pid_p, 0, 0.1);
-			SliderFloat("I", &pid_i, 0, 0.05);
-			SliderFloat("D", &pid_d, 0, 0.05);
+			SliderFloat("P", &pid_p, 0, 0.1f);
+			SliderFloat("I", &pid_i, 0, 0.05f);
+			SliderFloat("D", &pid_d, 0, 0.05f);
 			robot_->setJointControllerPidGains(pid_p, pid_i, pid_d);
 			End();
 
@@ -309,7 +513,7 @@ void Application::run(void) {
 			End();
 
 			Begin("Parameter editor");
-			if (BeginTable("paramtable", robot_->getNumJoints() + 1)) {
+			if (BeginTable("paramtable", static_cast<int>(robot_->getNumJoints()) + 1)) {
 				// header row
 				TableHeadersRow();
 				TableNextColumn();
@@ -322,20 +526,16 @@ void Application::run(void) {
 				Text("alpha");
 
 				// table content rows
-				for (int i = 0; i < robot_->getNumJoints(); i++) {
+				for (int i = 0; i < static_cast<int>(robot_->getNumJoints()); i++) {
 					PushID(i);
 					TableNextRow();
 					TableNextColumn();
-					//TableSetupColumn("", 0, 10);
 					Text("joint %d", i);
 					TableNextColumn();
-					//TableSetupColumn("a", 0, 10);
 					InputFloat("##a", &robot_params[i].a);
 					TableNextColumn();
-					//TableSetupColumn("b", 0, 10);
 					InputFloat("##b", &robot_params[i].d);
 					TableNextColumn();
-					//TableSetupColumn("c", 0, 10);
 					InputFloat("##c", &robot_params[i].alpha);
 					PopID();
 				}
@@ -346,25 +546,33 @@ void Application::run(void) {
 			}
 			End();
 
-			Begin("Performace");
+			Begin("Performance");
 			Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / GetIO().Framerate, GetIO().Framerate);
 			End();
 		}
 
 		update(dt);
-		render();
-		
-		// Swap the screen buffers
-		glfwSwapBuffers(window_);
+
+		// Render
+		VkCommandBuffer cmd = vkBase_.GetCurrentCommandBuffer();
+		render(cmd);
+
+		// Render ImGui
+		vkBase_.ImGuiRender(cmd);
+
+		vkBase_.EndFrame();
 	}
 
-	// imgui cleanup
-	ImGui_ImplOpenGL3_Shutdown();
-	ImGui_ImplGlfw_Shutdown();
-	ImGui::DestroyContext();
+	// Wait for device to be idle before cleanup
+	vkDeviceWaitIdle(vkBase_.GetDevice());
 
-	// Terminate GLFW, clearing any resources allocated by GLFW.
-	glfwTerminate();
+	// Cleanup Vulkan resources
+	if (vertexBuffer_.Buffer != VK_NULL_HANDLE) {
+		vkBase_.DestroyBuffer(vertexBuffer_);
+	}
+	destroyGraphicsPipeline();
+
+	vkBase_.Shutdown();
 }
 
 void Application::update(float dt)
@@ -373,7 +581,7 @@ void Application::update(float dt)
 	{
 		updateJointControlSliders();
 		// check if the robot reached the IK target already
-		bool finished = (robot_->getJointAngles() - robot_->getTargetJointAngles()).norm() < 0.01;
+		bool finished = (robot_->getJointAngles() - robot_->getTargetJointAngles()).norm() < 0.01f;
 		if (finished)
 		{
 			running_ik_solution_ = false;
@@ -384,32 +592,33 @@ void Application::update(float dt)
 		applyJointControls();
 	}
 
-	camera_.update(dt, window_);
+	camera_.update(dt, vkBase_.GetWindow());
 	robot_->update(dt);
 }
 
 void Application::setIkTarget() {
+	GLFWwindow* window = vkBase_.GetWindow();
 	// convert mouse pos to normalized image coordinates
 	Vector2d mouse_pos;
 	int window_width, window_height;
-	glfwGetCursorPos(window_, &mouse_pos.x(), &mouse_pos.y());
-	glfwGetFramebufferSize(window_, &window_width, &window_height);
-	float x = mouse_pos.x() / window_width;
-	float y = mouse_pos.y() / window_height;
+	glfwGetCursorPos(window, &mouse_pos.x(), &mouse_pos.y());
+	glfwGetFramebufferSize(window, &window_width, &window_height);
+	float x = static_cast<float>(mouse_pos.x()) / window_width;
+	float y = static_cast<float>(mouse_pos.y()) / window_height;
 	x = x * 2.0f - 1.0f;
 	y = 1.0f - (2.0f * y);
 
 	Vector4f ray_clip = {x, y, -1.0f, 1.0f};
 	Vector4f ray_eye = camera_.getProjectionMatrix().inverse() * ray_clip;
-	ray_eye.z() = -1.0;
-	ray_eye.w() = 0.0;
+	ray_eye.z() = -1.0f;
+	ray_eye.w() = 0.0f;
 
 	Vector3f ray_world = (camera_.getViewMatrix().inverse() * ray_eye).head<3>();
 	ray_world.normalize();
 
 	Vector3f camera_position = camera_.getPosition();
 
-	// ray should ge going from [camera_position] towards [ray_world]
+	// ray should be going from [camera_position] towards [ray_world]
 	float t = 2;
 	ray_start_ = camera_position;
 	ray_end_ = camera_position + ray_world * t;
@@ -426,74 +635,57 @@ void Application::abortRunningIkSolution() {
 
 void Application::updateJointControlSliders() {
 	// set the joint slider values to actual joint angles
-	for (int i = 0; i < joint_angle_controls_.size(); i++) {
-		joint_angle_controls_[i] = robot_->getJointAngle(i);
+	for (size_t i = 0; i < joint_angle_controls_.size(); i++) {
+		joint_angle_controls_[i] = robot_->getJointAngle(static_cast<unsigned>(i));
 	}
 }
 
 void Application::applyJointControls() {
 	// set robot joint rotations to slider values
-	for (int i = 0; i < joint_angle_controls_.size(); i++) {
+	for (size_t i = 0; i < joint_angle_controls_.size(); i++) {
 		float curr = joint_angle_controls_[i];
 		float prev = prev_controls_[i];
-		if (abs(curr - prev) > 0.0001) {
-			robot_->setJointTargetAngle(i, joint_angle_controls_[i]);
+		if (std::abs(curr - prev) > 0.0001f) {
+			robot_->setJointTargetAngle(static_cast<unsigned>(i), joint_angle_controls_[i]);
 			prev_controls_[i] = curr;
 		}
 	}
 }
 
-void Application::render(void) {
-	// Clear screen
-	glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	// Enable depth testing
-	glEnable(GL_DEPTH_TEST);
-
-	// Adjust viewport and aspect ratio to window
-	int screenWidth, screenHeight;
-	glfwGetFramebufferSize(window_, &screenWidth, &screenHeight);
-	glViewport(0, 0, screenWidth, screenHeight);
-	float fAspect = float(screenWidth) / screenHeight;
-
+void Application::render(VkCommandBuffer cmd) {
+	// Adjust aspect ratio
+	int screenWidth = vkBase_.GetWidth();
+	int screenHeight = vkBase_.GetHeight();
+	float fAspect = static_cast<float>(screenWidth) / static_cast<float>(screenHeight);
 	camera_.setAspectRatio(fAspect);
 
-	checkGlErrors();
-
-	// Set up transform matrices.
-	// They will be fed to the shader program via uniform variables.
-
-	// World space -> clip space transform: simple projection and camera.
+	// Set up transform matrices
 	Matrix4f C = camera_.getViewMatrix();
 	Matrix4f P = camera_.getProjectionMatrix();
 
-	if (drawmode_ == DrawMode::MODE_MESH_WIREFRAME) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	}
-
+	// Gather all vertices
 	std::vector<Vertex> vertices = robot_->getMeshVertices();
 
-	temp += 0.0001;
-	Vector3f lightpos = Vector3f(6 * sin(temp), 3.5, 6 * cos(temp));
-	BoxMesh lightmesh = BoxMesh(0.2, 0.2, 0.2, Vector4f(1, 1, 1, 1));
+	temp += 0.0001f;
+	Vector3f lightpos = Vector3f(6.0f * std::sin(temp), 3.5f, 6.0f * std::cos(temp));
+	BoxMesh lightmesh = BoxMesh(0.2f, 0.2f, 0.2f, Vector4f(1, 1, 1, 1));
 	lightmesh.transform(Translation3f(lightpos) * AngleAxisf::Identity());
 	std::vector<Vertex> lightverts = lightmesh.getVertices();
 	vertices.insert(vertices.end(), lightverts.begin(), lightverts.end());
 
-	SphereMesh ikmesh = SphereMesh(0.01, Vector4f(1, 0.2, 0.2, 1.0));
+	SphereMesh ikmesh = SphereMesh(0.01f, Vector4f(1, 0.2f, 0.2f, 1.0f));
 	ikmesh.transform(Translation3f(ray_end_) * AngleAxisf::Identity());
 	std::vector<Vertex> ikverts = ikmesh.getVertices();
 	vertices.insert(vertices.end(), ikverts.begin(), ikverts.end());
 
-	float square_size = 0.2;
+	float square_size = 0.2f;
 	float grid_size = 50;
 
 	std::vector<Vertex> planeVerts;
 
-	for (int i = 0; i < grid_size; i++) {
-		for (int j = 0; j < grid_size; j++) {
-			Vector4f color = (i + j) % 2 == 0 ? Vector4f(0.8, 0.8, 0.8, 1.0) : Vector4f(0.3, 0.3, 0.3, 1.0);
+	for (int i = 0; i < static_cast<int>(grid_size); i++) {
+		for (int j = 0; j < static_cast<int>(grid_size); j++) {
+			Vector4f color = (i + j) % 2 == 0 ? Vector4f(0.8f, 0.8f, 0.8f, 1.0f) : Vector4f(0.3f, 0.3f, 0.3f, 1.0f);
 
 			// left triangle
 			Vertex p1, p2, p3;
@@ -520,50 +712,51 @@ void Application::render(void) {
 	}
 	vertices.insert(vertices.end(), planeVerts.begin(), planeVerts.end());
 
-	SphereMesh sphere(0.2f, { 0.0, 0.5, 0, 0.5});
-	Affine3f t = AngleAxisf::Identity() * Translation3f(0, 0.2, 0);
+	SphereMesh sphere(0.2f, { 0.0f, 0.5f, 0.0f, 0.5f});
+	Affine3f t = AngleAxisf::Identity() * Translation3f(0, 0.2f, 0);
 	sphere.setToWorldTransform(t);
 	std::vector<Vertex> sphere_verts = sphere.getVertices();
 	vertices.insert(vertices.end(), sphere_verts.begin(), sphere_verts.end());
 
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	// Upload vertex data
+	uploadVertexData(vertices);
 
-	checkGlErrors();
+	if (vertexCount_ == 0) return;
 
-	glBindBuffer(GL_ARRAY_BUFFER, gl_.simple_vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * vertices.size(), vertices.data(), GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glUseProgram(gl_.simple_shader);
+	// Select pipeline based on draw mode
+	VkPipeline activePipeline = (drawmode_ == DrawMode::MODE_MESH_WIREFRAME) ?
+		wireframePipeline_ : pipeline_;
 
-	Matrix4f model = Matrix4f::Identity();
-	Vector3f viewpos = camera_.getPosition();
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
 
-	glUniformMatrix4fv(gl_.model, 1, GL_FALSE, model.data());
-	glUniformMatrix4fv(gl_.view, 1, GL_FALSE, C.data());
-	glUniformMatrix4fv(gl_.projection, 1, GL_FALSE, P.data());
+	// Bind vertex buffer
+	VkBuffer vertexBuffers[] = {vertexBuffer_.Buffer};
+	VkDeviceSize offsets[] = {0};
+	vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
 
-	glUniform3f(gl_.lightPos, lightpos.x(), lightpos.y(), lightpos.z());
-	glUniform3f(gl_.viewPos, viewpos.x(), viewpos.y(), viewpos.z());
-	glUniform3f(gl_.lightColor, 1, 1, 1);
+	// Set up push constants
+	// viewProj = projection * view (model is identity)
+	Matrix4f viewProj = P * C;
 
-	glBindVertexArray(gl_.simple_vao);
-	glDrawArrays(GL_TRIANGLES, 0, (int)vertices.size());
+	PushConstantData pc{};
+	pc.viewProj = viewProj;
+	pc.lightPosX = lightpos.x();
+	pc.lightPosY = lightpos.y();
+	pc.lightPosZ = lightpos.z();
+	pc._pad0 = 0.0f;
+	pc.viewPosX = camera_.getPosition().x();
+	pc.viewPosY = camera_.getPosition().y();
+	pc.viewPosZ = camera_.getPosition().z();
+	pc._pad1 = 0.0f;
+	pc.lightColorR = 1.0f;
+	pc.lightColorG = 1.0f;
+	pc.lightColorB = 1.0f;
+	pc._pad2 = 0.0f;
 
+	vkCmdPushConstants(cmd, pipelineLayout_,
+		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		0, sizeof(PushConstantData), &pc);
 
-	checkGlErrors();
-
-	if (drawmode_ == DrawMode::MODE_MESH_WIREFRAME) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	}
-
-	glBindVertexArray(0);
-	glUseProgram(0);
-
-	// GUI rendering:
-	ImGui::Render();
-	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-	// Check for OpenGL errors.
-	checkGlErrors();
+	// Draw all vertices
+	vkCmdDraw(cmd, vertexCount_, 1, 0, 0);
 }

@@ -3,7 +3,7 @@
 #include "../../Engine/Platform/Input.hpp"
 #include "../../Engine/Graphics/RenderCommand.hpp"
 #include <imgui.h>
-#include <glad/glad.h>
+// glad include removed (Vulkan migration)
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/norm.hpp>

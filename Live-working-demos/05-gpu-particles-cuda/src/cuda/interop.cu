@@ -8,30 +8,42 @@ void cudaCheck(cudaError_t err, const char* msg) {
     }
 }
 
-void registerGlBuffer(CudaGlBuffer& buf, unsigned int glBuffer) {
-    buf.glBuffer = glBuffer;
-    cudaError_t e = cudaGraphicsGLRegisterBuffer(&buf.cudaRes, glBuffer, cudaGraphicsMapFlagsWriteDiscard);
-    cudaCheck(e, "cudaGraphicsGLRegisterBuffer");
+void importVulkanBufferToCuda(CudaVulkanBuffer& buf,
+                              void* handle,
+                              size_t totalBytes,
+                              size_t bufferBytes,
+                              size_t offset)
+{
+    cudaExternalMemoryHandleDesc memDesc = {};
+#ifdef _WIN32
+    memDesc.type = cudaExternalMemoryHandleTypeOpaqueWin32;
+    memDesc.handle.win32.handle = handle;
+#else
+    memDesc.type = cudaExternalMemoryHandleTypeOpaqueFd;
+    memDesc.handle.fd = static_cast<int>(reinterpret_cast<intptr_t>(handle));
+#endif
+    memDesc.size = totalBytes;
+    memDesc.flags = 0;
+
+    cudaError_t err = cudaImportExternalMemory(&buf.extMem, &memDesc);
+    cudaCheck(err, "cudaImportExternalMemory");
+
+    cudaExternalMemoryBufferDesc bufDesc = {};
+    bufDesc.offset = offset;
+    bufDesc.size   = bufferBytes;
+    bufDesc.flags  = 0;
+
+    err = cudaExternalMemoryGetMappedBuffer(&buf.devPtr, buf.extMem, &bufDesc);
+    cudaCheck(err, "cudaExternalMemoryGetMappedBuffer");
+
+    buf.size = bufferBytes;
 }
 
-void unregisterGlBuffer(CudaGlBuffer& buf) {
-    if (buf.cudaRes) {
-        cudaError_t e = cudaGraphicsUnregisterResource(buf.cudaRes);
-        cudaCheck(e, "cudaGraphicsUnregisterResource");
-        buf.cudaRes = nullptr;
+void destroyCudaVulkanBuffer(CudaVulkanBuffer& buf) {
+    if (buf.extMem) {
+        cudaDestroyExternalMemory(buf.extMem);
+        buf.extMem = nullptr;
     }
-}
-
-void* mapGlBufferDevicePtr(CudaGlBuffer& buf, size_t& outBytes) {
-    cudaError_t e = cudaGraphicsMapResources(1, &buf.cudaRes, 0);
-    cudaCheck(e, "cudaGraphicsMapResources");
-    void* dptr = nullptr;
-    e = cudaGraphicsResourceGetMappedPointer(&dptr, &outBytes, buf.cudaRes);
-    cudaCheck(e, "cudaGraphicsResourceGetMappedPointer");
-    return dptr;
-}
-
-void unmapGlBuffer(CudaGlBuffer& buf) {
-    cudaError_t e = cudaGraphicsUnmapResources(1, &buf.cudaRes, 0);
-    cudaCheck(e, "cudaGraphicsUnmapResources");
+    buf.devPtr = nullptr;
+    buf.size   = 0;
 }

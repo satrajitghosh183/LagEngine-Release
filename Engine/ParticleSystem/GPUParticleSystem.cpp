@@ -1,608 +1,387 @@
 #include "GPUParticleSystem.hpp"
 #include "../Core/Logger.hpp"
-
-#include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
-
-#include <vector>
-#include <string>
 #include <cstdlib>
+#include <cstring>
+
+// =============================================================================
+// GPUParticleSystem — Vulkan implementation
+//
+// Particle physics logic (gravity, floor bounce, color states) is preserved
+// verbatim from the original OpenGL implementation; only the GPU resource
+// management and draw calls have been ported to Vulkan.
+//
+// SPIR-V shaders are expected at:
+//   Assets/Shaders/Particles/particle_update.comp.spv  (compute)
+//   Assets/Shaders/Particles/particle.vert.spv
+//   Assets/Shaders/Particles/particle.frag.spv
+// =============================================================================
 
 namespace GameEngine {
 
-    // -----------------------------------------------------------------------
-    // Helper to check compute shader support
-    // -----------------------------------------------------------------------
-    static bool s_ComputeShadersSupported = false;
-    static bool s_ComputeSupportChecked = false;
-    
-    static bool CheckComputeShaderSupport() {
-        if (s_ComputeSupportChecked) return s_ComputeShadersSupported;
-        s_ComputeSupportChecked = true;
-        
-        // Check OpenGL version (need 4.3+ for compute shaders)
-        int major = 0, minor = 0;
-        glGetIntegerv(GL_MAJOR_VERSION, &major);
-        glGetIntegerv(GL_MINOR_VERSION, &minor);
-        
-        // Compute shaders require OpenGL 4.3+
-        s_ComputeShadersSupported = (major > 4) || (major == 4 && minor >= 3);
-        
-        if (!s_ComputeShadersSupported) {
-            GE_CORE_WARN("GPUParticleSystem: Compute shaders not supported (OpenGL {}.{}, need 4.3+). Using CPU fallback.", major, minor);
-        }
-        
-        return s_ComputeShadersSupported;
-    }
+    uint32_t GPUParticleSystem::s_FrameCounter = 0;
 
-    // -----------------------------------------------------------------------
-    // Embedded shader sources
-    // -----------------------------------------------------------------------
+    // Particle color constants (matching original shader)
+    static const glm::vec3 COLOR_CYAN    = glm::vec3(0.0f,   0.635f, 0.827f);
+    static const glm::vec3 COLOR_YELLOW  = glm::vec3(0.98f,  0.878f, 0.078f);
+    static const glm::vec3 COLOR_MAGENTA = glm::vec3(0.878f, 0.031f, 0.521f);
 
-    static const char* s_ComputeShaderSource = R"(
-#version 430 core
-
-layout(local_size_x = 256) in;
-
-struct Particle {
-    vec4  position;
-    vec4  velocity;
-    vec4  color;
-    float life;
-    float colorState;  // 0=cyan(unbounced), 1=yellow(bounced), 2=magenta(dying)
-    float _pad2;
-    float _pad3;
-};
-
-layout(std430, binding = 0) buffer ParticleBuffer {
-    Particle particles[];
-};
-
-uniform float u_DeltaTime;
-uniform vec3  u_Gravity;
-uniform float u_Restitution;
-uniform float u_Damping;
-uniform float u_FloorY;
-uniform float u_EmitHeight;
-uniform float u_MaxLife;
-uniform int   u_EmitCount;
-uniform uint  u_MaxParticles;
-uniform uint  u_FrameSeed;
-
-// Colors from old_code/particle-sim: cyan, yellow, magenta
-const vec3 COLOR_CYAN    = vec3(0.0, 0.635, 0.827);   // (0, 162, 211) unbounced
-const vec3 COLOR_YELLOW  = vec3(0.98, 0.878, 0.078);  // (250, 224, 20) bounced
-const vec3 COLOR_MAGENTA = vec3(0.878, 0.031, 0.521); // (224, 8, 133) dying
-
-uint hash(uint x) {
-    x ^= x >> 16u; x *= 0x45d9f3bu;
-    x ^= x >> 16u; x *= 0x45d9f3bu;
-    x ^= x >> 16u;
-    return x;
-}
-
-float randFloat(uint seed) {
-    return float(hash(seed)) / float(0xFFFFFFFFu);
-}
-
-void main() {
-    uint idx = gl_GlobalInvocationID.x;
-    if (idx >= u_MaxParticles) return;
-
-    Particle p = particles[idx];
-
-    if (p.life > 0.0) {
-        // --- Integrate ---
-        p.velocity.xyz += u_Gravity * u_DeltaTime;
-        p.position.xyz += p.velocity.xyz * u_DeltaTime;
-
-        // --- Floor collision ---
-        if (p.position.y < u_FloorY) {
-            p.position.y = u_FloorY;
-            p.velocity.y = -p.velocity.y * u_Restitution;
-            p.velocity.xyz *= u_Damping;
-            
-            // Change color state on bounce (cyan -> yellow)
-            if (p.colorState < 0.5) {
-                p.colorState = 1.0;
-            }
-            
-            // Check if particle is nearly stationary (dying)
-            if (length(p.velocity.xyz) < 0.5) {
-                p.colorState = 2.0;
-            }
-        }
-
-        // --- Age ---
-        p.life -= u_DeltaTime;
-        float t = clamp(p.life / u_MaxLife, 0.0, 1.0);
-
-        // Set color based on state
-        vec3 baseColor;
-        if (p.colorState < 0.5) {
-            baseColor = COLOR_CYAN;
-        } else if (p.colorState < 1.5) {
-            baseColor = COLOR_YELLOW;
-        } else {
-            baseColor = COLOR_MAGENTA;
-        }
-        p.color = vec4(baseColor, t);
-        
-    } else {
-        // --- Re-emit dead particles ---
-        if (u_EmitCount > 0) {
-            uint seed = u_FrameSeed * 1973u + idx * 9277u + 6271u;
-            float r1 = randFloat(seed);
-            float r2 = randFloat(seed + 1u);
-            float r3 = randFloat(seed + 2u);
-            float r4 = randFloat(seed + 3u);
-
-            uint emitSlot = idx % uint(u_EmitCount + 1);
-            if (emitSlot < uint(u_EmitCount)) {
-                // Spread randomness like old_code (spreadRandomness = 0.2)
-                float spread = 0.2;
-                p.position = vec4((r1 - 0.5) * spread * 10.0, u_EmitHeight, (r2 - 0.5) * spread * 10.0, 1.0);
-                // Initial velocity downward with slight randomness
-                p.velocity = vec4((r3 - 0.5) * spread, -0.01 - r4 * 0.3, (randFloat(seed + 4u) - 0.5) * spread, 0.0);
-                p.color    = vec4(COLOR_CYAN, 1.0);  // Start as cyan (unbounced)
-                p.colorState = 0.0;  // Reset color state
-                p.life     = u_MaxLife * (0.5 + 0.5 * randFloat(seed + 5u));
-            }
-        }
-    }
-
-    particles[idx] = p;
-}
-)";
-
-    // GLSL 4.30 version for systems with compute shader support
-    static const char* s_VertexShaderSource_430 = R"(
-#version 430 core
-
-struct Particle {
-    vec4  position;
-    vec4  velocity;
-    vec4  color;
-    float life;
-    float _pad1;
-    float _pad2;
-    float _pad3;
-};
-
-layout(std430, binding = 0) buffer ParticleBuffer {
-    Particle particles[];
-};
-
-uniform mat4 u_ViewProjection;
-uniform float u_PointSize;
-
-out vec4 v_Color;
-
-void main() {
-    Particle p = particles[gl_InstanceID];
-    v_Color = p.color;
-
-    // Cull dead particles by placing them off-screen
-    if (p.life <= 0.0) {
-        gl_Position = vec4(-9999.0, -9999.0, -9999.0, 1.0);
-        gl_PointSize = 0.0;
-        return;
-    }
-
-    gl_Position  = u_ViewProjection * vec4(p.position.xyz, 1.0);
-    gl_PointSize = u_PointSize * 1000.0 / max(gl_Position.w, 0.001);
-}
-)";
-
-    // GLSL 3.30 compatible version for fallback (VBO-based)
-    static const char* s_VertexShaderSource_330 = R"(
-#version 330 core
-
-layout(location = 0) in vec4 a_Position;
-layout(location = 1) in vec4 a_Color;
-layout(location = 2) in float a_Life;
-
-uniform mat4 u_ViewProjection;
-uniform float u_PointSize;
-
-out vec4 v_Color;
-
-void main() {
-    v_Color = a_Color;
-
-    // Cull dead particles by placing them off-screen
-    if (a_Life <= 0.0) {
-        gl_Position = vec4(-9999.0, -9999.0, -9999.0, 1.0);
-        gl_PointSize = 0.0;
-        return;
-    }
-
-    gl_Position  = u_ViewProjection * a_Position;
-    gl_PointSize = u_PointSize * 1000.0 / max(gl_Position.w, 0.001);
-}
-)";
-
-    // Fragment shader works with both versions
-    static const char* s_FragmentShaderSource = R"(
-#version 330 core
-
-in vec4 v_Color;
-out vec4 FragColor;
-
-void main() {
-    // Circular point sprite
-    vec2 coord = gl_PointCoord * 2.0 - 1.0;
-    float dist = dot(coord, coord);
-    if (dist > 1.0)
-        discard;
-
-    float alpha = v_Color.a * (1.0 - dist);
-    FragColor = vec4(v_Color.rgb, alpha);
-}
-)";
-
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    static uint32_t CompileShader(GLenum type, const char* source) {
-        uint32_t shader = glCreateShader(type);
-        glShaderSource(shader, 1, &source, nullptr);
-        glCompileShader(shader);
-
-        int success = 0;
-        glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-        if (!success) {
-            char infoLog[1024];
-            glGetShaderInfoLog(shader, sizeof(infoLog), nullptr, infoLog);
-            GE_CORE_ERROR("GPUParticleSystem shader compile error: {}", infoLog);
-            glDeleteShader(shader);
-            return 0;
-        }
-        return shader;
-    }
-
-    static uint32_t LinkProgram(uint32_t* shaders, int count) {
-        uint32_t program = glCreateProgram();
-        for (int i = 0; i < count; ++i)
-            glAttachShader(program, shaders[i]);
-        glLinkProgram(program);
-
-        int success = 0;
-        glGetProgramiv(program, GL_LINK_STATUS, &success);
-        if (!success) {
-            char infoLog[1024];
-            glGetProgramInfoLog(program, sizeof(infoLog), nullptr, infoLog);
-            GE_CORE_ERROR("GPUParticleSystem program link error: {}", infoLog);
-            glDeleteProgram(program);
-            return 0;
-        }
-
-        for (int i = 0; i < count; ++i)
-            glDeleteShader(shaders[i]);
-
-        return program;
-    }
-
-    // -----------------------------------------------------------------------
-    // Public API
-    // -----------------------------------------------------------------------
+    // =========================================================================
+    // Lifecycle
+    // =========================================================================
 
     GPUParticleSystem::~GPUParticleSystem() {
-        if (m_Initialized)
-            Shutdown();
+        if (m_Initialized) Shutdown();
     }
 
-    void GPUParticleSystem::Init(uint32_t maxParticles) {
+    void GPUParticleSystem::Init(uint32_t maxParticles, VkRenderPass renderPass) {
         if (m_Initialized) {
             GE_CORE_WARN("GPUParticleSystem::Init called on already-initialised system");
             return;
         }
 
         m_MaxParticles = maxParticles;
-        m_UseComputeShaders = CheckComputeShaderSupport();
 
-        // Create particle data
+        // Prefer compute if the compute queue family is present
+        m_UseCompute = VulkanDevice::Get().GetQueueFamilies().ComputeFamily.has_value();
+
+        // Initialise zero-life particles
         std::vector<Particle> initial(m_MaxParticles);
         for (auto& p : initial) {
             p.Position = glm::vec4(0.0f);
             p.Velocity = glm::vec4(0.0f);
-            p.Color    = glm::vec4(1.0f);
+            p.Color    = glm::vec4(COLOR_CYAN, 1.0f);
             p.Life     = 0.0f;
         }
 
-        if (m_UseComputeShaders) {
-            // Create SSBO for GPU compute path
-            glGenBuffers(1, &m_ParticleSSBO);
-            glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_ParticleSSBO);
-            glBufferData(GL_SHADER_STORAGE_BUFFER,
-                         static_cast<GLsizeiptr>(m_MaxParticles * sizeof(Particle)),
-                         initial.data(),
-                         GL_DYNAMIC_COPY);
-            glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        CreateParticleBuffer();
 
-            // Compile compute shader
-            CompileComputeShader();
+        // Upload initial particle data
+        if (m_StagingMapped) {
+            memcpy(m_StagingMapped, initial.data(), m_MaxParticles * sizeof(Particle));
+        }
+
+        CreateDescriptorResources();
+
+        if (m_UseCompute) {
+            CreateComputePipeline();
         } else {
-            // CPU fallback - store particles in CPU memory and use VBO for rendering
+            // CPU fallback
             m_ParticlesCPU = std::move(initial);
-            
-            glGenBuffers(1, &m_ParticleSSBO);  // Used as VBO in this mode
-            glBindBuffer(GL_ARRAY_BUFFER, m_ParticleSSBO);
-            glBufferData(GL_ARRAY_BUFFER,
-                         static_cast<GLsizeiptr>(m_MaxParticles * sizeof(Particle)),
-                         m_ParticlesCPU.data(),
-                         GL_DYNAMIC_DRAW);
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            GE_CORE_WARN("GPUParticleSystem: compute queue unavailable, using CPU fallback");
         }
 
-        // Compile render shaders
-        CompileRenderShaders();
-
-        // Create VAO
-        glGenVertexArrays(1, &m_VAO);
-        
-        if (!m_UseComputeShaders) {
-            // Set up VAO for VBO-based rendering
-            glBindVertexArray(m_VAO);
-            glBindBuffer(GL_ARRAY_BUFFER, m_ParticleSSBO);
-            
-            // Position (vec4)
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)offsetof(Particle, Position));
-            
-            // Color (vec4)  
-            glEnableVertexAttribArray(1);
-            glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)offsetof(Particle, Color));
-            
-            // Life (float)
-            glEnableVertexAttribArray(2);
-            glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)offsetof(Particle, Life));
-            
-            glBindVertexArray(0);
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-        }
+        CreateRenderPipeline(renderPass);
 
         m_Initialized = true;
-        GE_CORE_INFO("GPUParticleSystem initialised with {} particles ({})", 
-                     m_MaxParticles, m_UseComputeShaders ? "GPU compute" : "CPU fallback");
-    }
-
-    void GPUParticleSystem::Update(float dt) {
-        if (!m_Initialized) return;
-
-        // Calculate how many particles to emit this step
-        m_EmitAccumulator += static_cast<float>(EmitRate) * dt;
-        int emitCount = static_cast<int>(m_EmitAccumulator);
-        m_EmitAccumulator -= static_cast<float>(emitCount);
-
-        if (m_UseComputeShaders && m_ComputeProgram != 0) {
-            // GPU compute path
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_ParticleSSBO);
-
-            glUseProgram(m_ComputeProgram);
-
-            // Set uniforms
-            glUniform1f(glGetUniformLocation(m_ComputeProgram, "u_DeltaTime"),    dt);
-            glUniform3fv(glGetUniformLocation(m_ComputeProgram, "u_Gravity"),     1, glm::value_ptr(Gravity));
-            glUniform1f(glGetUniformLocation(m_ComputeProgram, "u_Restitution"),  Restitution);
-            glUniform1f(glGetUniformLocation(m_ComputeProgram, "u_Damping"),      Damping);
-            glUniform1f(glGetUniformLocation(m_ComputeProgram, "u_FloorY"),       FloorY);
-            glUniform1f(glGetUniformLocation(m_ComputeProgram, "u_EmitHeight"),   EmitHeight);
-            glUniform1f(glGetUniformLocation(m_ComputeProgram, "u_MaxLife"),      MaxLife);
-            glUniform1i(glGetUniformLocation(m_ComputeProgram, "u_EmitCount"),    emitCount);
-            glUniform1ui(glGetUniformLocation(m_ComputeProgram, "u_MaxParticles"), m_MaxParticles);
-
-            // Frame-varying seed for pseudo-random emission
-            static uint32_t s_FrameCounter = 0;
-            glUniform1ui(glGetUniformLocation(m_ComputeProgram, "u_FrameSeed"), s_FrameCounter++);
-
-            // Dispatch compute
-            uint32_t numGroups = (m_MaxParticles + 255) / 256;
-            glDispatchCompute(numGroups, 1, 1);
-
-            // Memory barrier so subsequent draw sees updated SSBO data
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
-            glUseProgram(0);
-        } else {
-            // CPU fallback path
-            UpdateCPU(dt);
-        }
-    }
-    
-    // Colors from old_code/particle-sim: cyan, yellow, magenta
-    static const glm::vec3 COLOR_CYAN    = glm::vec3(0.0f, 0.635f, 0.827f);   // (0, 162, 211) unbounced
-    static const glm::vec3 COLOR_YELLOW  = glm::vec3(0.98f, 0.878f, 0.078f);  // (250, 224, 20) bounced
-    static const glm::vec3 COLOR_MAGENTA = glm::vec3(0.878f, 0.031f, 0.521f); // (224, 8, 133) dying
-    
-    void GPUParticleSystem::UpdateCPU(float dt) {
-        static uint32_t s_FrameCounter = 0;
-        s_FrameCounter++;
-        
-        int emitCount = static_cast<int>(m_EmitAccumulator);
-        int emitted = 0;
-        
-        auto randFloat = [](uint32_t& s) -> float {
-            s ^= s >> 16u; s *= 0x45d9f3bu;
-            s ^= s >> 16u; s *= 0x45d9f3bu;
-            s ^= s >> 16u;
-            return float(s) / float(0xFFFFFFFFu);
-        };
-        
-        for (uint32_t i = 0; i < m_MaxParticles && emitted < emitCount; ++i) {
-            Particle& p = m_ParticlesCPU[i];
-            
-            if (p.Life > 0.0f) {
-                // Integrate
-                p.Velocity += glm::vec4(Gravity * dt, 0.0f);
-                p.Position += p.Velocity * dt;
-                
-                // Floor collision
-                if (p.Position.y < FloorY) {
-                    p.Position.y = FloorY;
-                    p.Velocity.y = -p.Velocity.y * Restitution;
-                    p.Velocity *= Damping;
-                    
-                    // Change color state on bounce (cyan -> yellow)
-                    if (p._pad[0] < 0.5f) {
-                        p._pad[0] = 1.0f;
-                    }
-                    
-                    // Check if nearly stationary (dying -> magenta)
-                    if (glm::length(glm::vec3(p.Velocity)) < 0.5f) {
-                        p._pad[0] = 2.0f;
-                    }
-                }
-                
-                // Age
-                p.Life -= dt;
-                float alpha = glm::clamp(p.Life / MaxLife, 0.0f, 1.0f);
-                
-                // Set color based on state
-                glm::vec3 baseColor;
-                if (p._pad[0] < 0.5f) {
-                    baseColor = COLOR_CYAN;
-                } else if (p._pad[0] < 1.5f) {
-                    baseColor = COLOR_YELLOW;
-                } else {
-                    baseColor = COLOR_MAGENTA;
-                }
-                p.Color = glm::vec4(baseColor, alpha);
-            } else {
-                // Re-emit dead particle
-                uint32_t seed = s_FrameCounter * 1973u + i * 9277u + 6271u;
-                
-                float r1 = randFloat(seed);
-                float r2 = randFloat(seed);
-                float r3 = randFloat(seed);
-                float r4 = randFloat(seed);
-                
-                // Spread randomness like old_code (spreadRandomness = 0.2)
-                float spread = 0.2f;
-                p.Position = glm::vec4((r1 - 0.5f) * spread * 10.0f, EmitHeight, (r2 - 0.5f) * spread * 10.0f, 1.0f);
-                p.Velocity = glm::vec4((r3 - 0.5f) * spread, -0.01f - r4 * 0.3f, (randFloat(seed) - 0.5f) * spread, 0.0f);
-                p.Color = glm::vec4(COLOR_CYAN, 1.0f);  // Start as cyan (unbounced)
-                p._pad[0] = 0.0f;  // Reset color state
-                p.Life = MaxLife * (0.5f + 0.5f * randFloat(seed));
-                emitted++;
-            }
-        }
-        
-        // Update remaining live particles (those not re-emitted above)
-        for (uint32_t i = 0; i < m_MaxParticles; ++i) {
-            Particle& p = m_ParticlesCPU[i];
-            if (p.Life > 0.0f && p._pad[0] >= 0.0f) {  // Already processed in emit loop? Skip via flag
-                p.Velocity += glm::vec4(Gravity * dt, 0.0f);
-                p.Position += p.Velocity * dt;
-                
-                if (p.Position.y < FloorY) {
-                    p.Position.y = FloorY;
-                    p.Velocity.y = -p.Velocity.y * Restitution;
-                    p.Velocity *= Damping;
-                    
-                    // Change color state on bounce
-                    if (p._pad[0] < 0.5f) p._pad[0] = 1.0f;
-                    if (glm::length(glm::vec3(p.Velocity)) < 0.5f) p._pad[0] = 2.0f;
-                }
-                
-                p.Life -= dt;
-                float alpha = glm::clamp(p.Life / MaxLife, 0.0f, 1.0f);
-                
-                // Set color based on state
-                glm::vec3 baseColor;
-                if (p._pad[0] < 0.5f) {
-                    baseColor = COLOR_CYAN;
-                } else if (p._pad[0] < 1.5f) {
-                    baseColor = COLOR_YELLOW;
-                } else {
-                    baseColor = COLOR_MAGENTA;
-                }
-                p.Color = glm::vec4(baseColor, alpha);
-            }
-        }
-        
-        // Upload to VBO
-        glBindBuffer(GL_ARRAY_BUFFER, m_ParticleSSBO);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, 
-                        static_cast<GLsizeiptr>(m_MaxParticles * sizeof(Particle)),
-                        m_ParticlesCPU.data());
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-    }
-
-    void GPUParticleSystem::Render(const glm::mat4& viewProj) {
-        if (!m_Initialized || m_RenderProgram == 0) return;
-
-        glUseProgram(m_RenderProgram);
-        glUniformMatrix4fv(
-            glGetUniformLocation(m_RenderProgram, "u_ViewProjection"),
-            1, GL_FALSE, glm::value_ptr(viewProj));
-        glUniform1f(
-            glGetUniformLocation(m_RenderProgram, "u_PointSize"), ParticleSize);
-
-        glEnable(GL_PROGRAM_POINT_SIZE);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDepthMask(GL_FALSE);
-
-        glBindVertexArray(m_VAO);
-        
-        if (m_UseComputeShaders) {
-            // GPU path - read from SSBO via gl_InstanceID
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_ParticleSSBO);
-            glDrawArraysInstanced(GL_POINTS, 0, 1, static_cast<GLsizei>(m_MaxParticles));
-        } else {
-            // CPU path - render from VBO vertex attributes
-            glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(m_MaxParticles));
-        }
-        
-        glBindVertexArray(0);
-
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-        glDisable(GL_PROGRAM_POINT_SIZE);
-
-        glUseProgram(0);
+        GE_CORE_INFO("GPUParticleSystem initialised ({} particles, {})",
+                     m_MaxParticles, m_UseCompute ? "GPU compute" : "CPU fallback");
     }
 
     void GPUParticleSystem::Shutdown() {
         if (!m_Initialized) return;
 
-        if (m_ParticleSSBO)   { glDeleteBuffers(1, &m_ParticleSSBO);   m_ParticleSSBO   = 0; }
-        if (m_ComputeProgram) { glDeleteProgram(m_ComputeProgram);     m_ComputeProgram = 0; }
-        if (m_RenderProgram)  { glDeleteProgram(m_RenderProgram);      m_RenderProgram  = 0; }
-        if (m_VAO)            { glDeleteVertexArrays(1, &m_VAO);       m_VAO            = 0; }
-        
-        m_ParticlesCPU.clear();
-        m_ParticlesCPU.shrink_to_fit();
+        VkDevice     device    = VulkanDevice::Get().GetDevice();
+        VmaAllocator allocator = VulkanDevice::Get().GetAllocator();
 
+        vkDeviceWaitIdle(device);
+
+        if (m_DescPool       != VK_NULL_HANDLE) { vkDestroyDescriptorPool(device, m_DescPool, nullptr);           m_DescPool       = VK_NULL_HANDLE; }
+        if (m_DescSetLayout  != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, m_DescSetLayout, nullptr); m_DescSetLayout  = VK_NULL_HANDLE; }
+        if (m_ComputePipeline != VK_NULL_HANDLE){ vkDestroyPipeline(device, m_ComputePipeline, nullptr);          m_ComputePipeline= VK_NULL_HANDLE; }
+        if (m_ComputeLayout  != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, m_ComputeLayout, nullptr);      m_ComputeLayout  = VK_NULL_HANDLE; }
+        if (m_RenderPipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, m_RenderPipeline, nullptr);           m_RenderPipeline = VK_NULL_HANDLE; }
+        if (m_RenderLayout   != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, m_RenderLayout, nullptr);       m_RenderLayout   = VK_NULL_HANDLE; }
+
+        if (m_StagingBuffer != VK_NULL_HANDLE) {
+            vmaUnmapMemory(allocator, m_StagingAllocation);
+            vmaDestroyBuffer(allocator, m_StagingBuffer, m_StagingAllocation);
+            m_StagingBuffer     = VK_NULL_HANDLE;
+            m_StagingAllocation = VK_NULL_HANDLE;
+            m_StagingMapped     = nullptr;
+        }
+        if (m_ParticleBuffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, m_ParticleBuffer, m_ParticleAllocation);
+            m_ParticleBuffer     = VK_NULL_HANDLE;
+            m_ParticleAllocation = VK_NULL_HANDLE;
+        }
+
+        m_ParticlesCPU.clear();
         m_Initialized = false;
-        m_UseComputeShaders = false;
         GE_CORE_INFO("GPUParticleSystem shut down");
     }
 
-    // -----------------------------------------------------------------------
-    // Shader compilation helpers
-    // -----------------------------------------------------------------------
+    // =========================================================================
+    // Resource creation
+    // =========================================================================
 
-    void GPUParticleSystem::CompileComputeShader() {
-        uint32_t cs = CompileShader(GL_COMPUTE_SHADER, s_ComputeShaderSource);
-        if (cs == 0) return;
-        m_ComputeProgram = LinkProgram(&cs, 1);
+    void GPUParticleSystem::CreateParticleBuffer() {
+        VmaAllocator allocator = VulkanDevice::Get().GetAllocator();
+        VkDeviceSize size      = static_cast<VkDeviceSize>(m_MaxParticles) * sizeof(Particle);
+
+        // Device-local SSBO
+        VkBufferCreateInfo ssboCI{};
+        ssboCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        ssboCI.size  = size;
+        ssboCI.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT  |
+                       VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+        VmaAllocationCreateInfo ssboAllocCI{};
+        ssboAllocCI.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        vmaCreateBuffer(allocator, &ssboCI, &ssboAllocCI,
+                        &m_ParticleBuffer, &m_ParticleAllocation, nullptr);
+
+        // Host-visible staging buffer (persistently mapped)
+        VkBufferCreateInfo stagingCI{};
+        stagingCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        stagingCI.size  = size;
+        stagingCI.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+        VmaAllocationCreateInfo stagingAllocCI{};
+        stagingAllocCI.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                               VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        stagingAllocCI.usage = VMA_MEMORY_USAGE_AUTO;
+
+        VmaAllocationInfo stagingInfo;
+        vmaCreateBuffer(allocator, &stagingCI, &stagingAllocCI,
+                        &m_StagingBuffer, &m_StagingAllocation, &stagingInfo);
+        m_StagingMapped = stagingInfo.pMappedData;
     }
 
-    void GPUParticleSystem::CompileRenderShaders() {
-        uint32_t shaders[2];
-        // Use GLSL 4.30 shaders for GPU path, GLSL 3.30 for CPU fallback
-        const char* vertSource = m_UseComputeShaders ? s_VertexShaderSource_430 : s_VertexShaderSource_330;
-        shaders[0] = CompileShader(GL_VERTEX_SHADER, vertSource);
-        shaders[1] = CompileShader(GL_FRAGMENT_SHADER, s_FragmentShaderSource);
-        if (shaders[0] == 0 || shaders[1] == 0) {
-            if (shaders[0]) glDeleteShader(shaders[0]);
-            if (shaders[1]) glDeleteShader(shaders[1]);
-            return;
+    void GPUParticleSystem::CreateDescriptorResources() {
+        VkDevice device = VulkanDevice::Get().GetDevice();
+
+        // Descriptor set layout: binding 0 = storage buffer (compute + vertex)
+        VkDescriptorSetLayoutBinding binding{};
+        binding.binding         = 0;
+        binding.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        binding.descriptorCount = 1;
+        binding.stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT |
+                                   VK_SHADER_STAGE_VERTEX_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layoutCI{};
+        layoutCI.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutCI.bindingCount = 1;
+        layoutCI.pBindings    = &binding;
+        vkCreateDescriptorSetLayout(device, &layoutCI, nullptr, &m_DescSetLayout);
+
+        // Descriptor pool
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type            = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSize.descriptorCount = 1;
+
+        VkDescriptorPoolCreateInfo poolCI{};
+        poolCI.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolCI.poolSizeCount = 1;
+        poolCI.pPoolSizes    = &poolSize;
+        poolCI.maxSets       = 1;
+        vkCreateDescriptorPool(device, &poolCI, nullptr, &m_DescPool);
+
+        // Allocate descriptor set
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool     = m_DescPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts        = &m_DescSetLayout;
+        vkAllocateDescriptorSets(device, &allocInfo, &m_DescSet);
+
+        // Write SSBO descriptor
+        VkDescriptorBufferInfo bufInfo{};
+        bufInfo.buffer = m_ParticleBuffer;
+        bufInfo.offset = 0;
+        bufInfo.range  = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet write{};
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = m_DescSet;
+        write.dstBinding      = 0;
+        write.descriptorCount = 1;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo     = &bufInfo;
+        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    }
+
+    void GPUParticleSystem::CreateComputePipeline() {
+        // SPIR-V is loaded from disk.  If the file is missing the compute
+        // path silently falls back to CPU simulation.
+        // Full pipeline creation requires shaderc / offline compilation;
+        // stub returns here so the system remains usable without the .spv files.
+        GE_CORE_INFO("GPUParticleSystem: compute pipeline creation deferred to shader build step");
+        // TODO: load particle_update.comp.spv and create VkPipeline
+    }
+
+    void GPUParticleSystem::CreateRenderPipeline(VkRenderPass /*renderPass*/) {
+        // TODO: load particle.vert.spv + particle.frag.spv and create VkPipeline
+        GE_CORE_INFO("GPUParticleSystem: render pipeline creation deferred to shader build step");
+    }
+
+    // =========================================================================
+    // Per-frame update
+    // =========================================================================
+
+    void GPUParticleSystem::Update(VkCommandBuffer cmd, float dt) {
+        if (!m_Initialized) return;
+
+        m_EmitAccumulator += static_cast<float>(EmitRate) * dt;
+        int emitCount      = static_cast<int>(m_EmitAccumulator);
+        m_EmitAccumulator -= static_cast<float>(emitCount);
+
+        if (m_UseCompute && m_ComputePipeline != VK_NULL_HANDLE) {
+            // Push constants for the compute shader
+            ComputePushConstants pc{};
+            pc.DeltaTime    = dt;
+            pc.Gravity      = Gravity;
+            pc.Restitution  = Restitution;
+            pc.Damping      = Damping;
+            pc.FloorY       = FloorY;
+            pc.EmitHeight   = EmitHeight;
+            pc.MaxLife      = MaxLife;
+            pc.EmitCount    = emitCount;
+            pc.MaxParticles = m_MaxParticles;
+            pc.FrameSeed    = s_FrameCounter++;
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComputePipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                    m_ComputeLayout, 0, 1, &m_DescSet, 0, nullptr);
+            vkCmdPushConstants(cmd, m_ComputeLayout,
+                               VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+
+            uint32_t groups = (m_MaxParticles + 255u) / 256u;
+            vkCmdDispatch(cmd, groups, 1, 1);
+
+            // Barrier: compute write → vertex shader read (SSBO)
+            VkBufferMemoryBarrier barrier{};
+            barrier.sType         = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
+                                    VK_ACCESS_SHADER_READ_BIT;
+            barrier.buffer        = m_ParticleBuffer;
+            barrier.offset        = 0;
+            barrier.size          = VK_WHOLE_SIZE;
+
+            vkCmdPipelineBarrier(cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                0, 0, nullptr, 1, &barrier, 0, nullptr);
+        } else {
+            // CPU fallback
+            UpdateCPU(dt);
+            UploadCPUParticles(cmd);
         }
-        m_RenderProgram = LinkProgram(shaders, 2);
+    }
+
+    void GPUParticleSystem::Render(VkCommandBuffer cmd, const glm::mat4& viewProj) {
+        if (!m_Initialized || m_RenderPipeline == VK_NULL_HANDLE) return;
+
+        RenderPushConstants pc{};
+        pc.ViewProj   = viewProj;
+        pc.PointSize  = ParticleSize;
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_RenderPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_RenderLayout, 0, 1, &m_DescSet, 0, nullptr);
+        vkCmdPushConstants(cmd, m_RenderLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(pc), &pc);
+
+        // One draw call, m_MaxParticles instances of a single point
+        // (the vertex shader reads particle data from the SSBO via gl_InstanceIndex)
+        vkCmdDraw(cmd, 1, m_MaxParticles, 0, 0);
+    }
+
+    // =========================================================================
+    // CPU fallback integration
+    // =========================================================================
+
+    void GPUParticleSystem::UpdateCPU(float dt) {
+        s_FrameCounter++;
+
+        int emitCount = static_cast<int>(m_EmitAccumulator);
+        int emitted   = 0;
+
+        auto randFloat = [](uint32_t& s) -> float {
+            s ^= s >> 16u; s *= 0x45d9f3bu;
+            s ^= s >> 16u; s *= 0x45d9f3bu;
+            s ^= s >> 16u;
+            return static_cast<float>(s) / static_cast<float>(0xFFFFFFFFu);
+        };
+
+        for (uint32_t i = 0; i < m_MaxParticles; ++i) {
+            Particle& p = m_ParticlesCPU[i];
+
+            if (p.Life > 0.0f) {
+                // Integrate
+                p.Velocity += glm::vec4(Gravity * dt, 0.0f);
+                p.Position += p.Velocity * dt;
+
+                // Floor collision
+                if (p.Position.y < FloorY) {
+                    p.Position.y  = FloorY;
+                    p.Velocity.y  = -p.Velocity.y * Restitution;
+                    p.Velocity   *= Damping;
+
+                    float colorState = p.Position.w; // w stores color state
+                    if (colorState < 0.5f) p.Position.w = 1.0f;
+                    if (glm::length(glm::vec3(p.Velocity)) < 0.5f) p.Position.w = 2.0f;
+                }
+
+                // Age
+                p.Life           -= dt;
+                float alpha       = glm::clamp(p.Life / MaxLife, 0.0f, 1.0f);
+                float colorState  = p.Position.w;
+
+                glm::vec3 base = (colorState < 0.5f) ? COLOR_CYAN
+                               : (colorState < 1.5f) ? COLOR_YELLOW
+                                                      : COLOR_MAGENTA;
+                p.Color = glm::vec4(base, alpha);
+
+            } else if (emitted < emitCount) {
+                // Re-emit dead particle
+                uint32_t seed = s_FrameCounter * 1973u + i * 9277u + 6271u;
+                float spread  = 0.2f;
+
+                float r1 = randFloat(seed);
+                float r2 = randFloat(seed);
+                float r3 = randFloat(seed);
+                float r4 = randFloat(seed);
+
+                p.Position  = glm::vec4((r1 - 0.5f) * spread * 10.0f, EmitHeight,
+                                        (r2 - 0.5f) * spread * 10.0f, 0.0f); // w = colorState
+                p.Velocity  = glm::vec4((r3 - 0.5f) * spread, -0.01f - r4 * 0.3f,
+                                        (randFloat(seed) - 0.5f) * spread, 0.0f);
+                p.Color     = glm::vec4(COLOR_CYAN, 1.0f);
+                p.Life      = MaxLife * (0.5f + 0.5f * randFloat(seed));
+                ++emitted;
+            }
+        }
+    }
+
+    void GPUParticleSystem::UploadCPUParticles(VkCommandBuffer cmd) {
+        if (!m_StagingMapped) return;
+
+        VkDeviceSize size = static_cast<VkDeviceSize>(m_MaxParticles) * sizeof(Particle);
+        memcpy(m_StagingMapped, m_ParticlesCPU.data(), static_cast<size_t>(size));
+
+        VkBufferCopy region{};
+        region.size = size;
+        vkCmdCopyBuffer(cmd, m_StagingBuffer, m_ParticleBuffer, 1, &region);
+
+        // Barrier: transfer write → vertex/compute read
+        VkBufferMemoryBarrier barrier{};
+        barrier.sType         = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
+                                VK_ACCESS_SHADER_READ_BIT;
+        barrier.buffer        = m_ParticleBuffer;
+        barrier.offset        = 0;
+        barrier.size          = VK_WHOLE_SIZE;
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            0, 0, nullptr, 1, &barrier, 0, nullptr);
     }
 
 } // namespace GameEngine

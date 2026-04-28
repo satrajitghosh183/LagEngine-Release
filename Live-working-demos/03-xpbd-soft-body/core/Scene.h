@@ -1,10 +1,11 @@
 //
 // Created by barth on 19/09/2022.
 //
+// Vulkan port: Scene::render() records Vulkan draw commands.
+//
 
 #ifndef FEATHERGL_SCENE_H
 #define FEATHERGL_SCENE_H
-
 
 #include "../meshes/Mesh.h"
 #include "cameras/Camera.h"
@@ -12,16 +13,13 @@
 #include "postprocessing.h"
 #include "shadows/ShadowRenderer.h"
 #include "DirectionalLight.h"
+#include <VulkanBase.hpp>
 
 class Scene {
 public:
-    explicit Scene(std::shared_ptr<Engine> engine) {
-        _engine = engine;
+    explicit Scene(std::shared_ptr<Engine> engine);
 
-        _engine->onWindowResizeObservable.add([this](int width, int height) {
-            this->_activeCamera->setAspectRatio((float) width / (float) height);
-        });
-    }
+    ~Scene();
 
     void addMesh(std::shared_ptr<Mesh> mesh);
 
@@ -33,9 +31,7 @@ public:
 
     void addPostProcess(std::shared_ptr<PostProcessing> postProcess) {
         _postProcesses.push_back(postProcess);
-        _engine->onWindowResizeObservable.add([postProcess](int width, int height) {
-            postProcess->resize(width, height);
-        });
+        // PostProcessing is a no-op in Vulkan port
     }
 
     void addShadowRenderer(std::shared_ptr<ShadowRenderer> shadowRenderer) {
@@ -57,9 +53,7 @@ public:
     void render();
 
     void compileShaders() {
-        for (auto mesh: _meshes) {
-            mesh->material()->shader()->compile();
-        }
+        // No-op in Vulkan port
     }
 
     std::vector<std::shared_ptr<Mesh>> meshes() {
@@ -98,6 +92,9 @@ public:
     void addDirectionalLight(std::shared_ptr<DirectionalLight> pLight);
 
 private:
+    void initVulkanPipeline();
+    void cleanupVulkanPipeline();
+
     std::shared_ptr<Engine> _engine;
 
     std::vector<std::shared_ptr<PointLight>> _pointLights{};
@@ -109,7 +106,17 @@ private:
     std::vector<std::shared_ptr<PostProcessing>> _postProcesses{};
 
     std::shared_ptr<Camera> _activeCamera = nullptr;
-};
 
+    // Vulkan pipeline state
+    VkPipeline _pipeline = VK_NULL_HANDLE;
+    VkPipeline _wireframePipeline = VK_NULL_HANDLE;
+    VkPipeline _noCullPipeline = VK_NULL_HANDLE;
+    VkPipeline _wireframeNoCullPipeline = VK_NULL_HANDLE;
+    VkPipeline _linePipeline = VK_NULL_HANDLE;
+    VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
+    VkShaderModule _vertShaderModule = VK_NULL_HANDLE;
+    VkShaderModule _fragShaderModule = VK_NULL_HANDLE;
+    bool _pipelineReady = false;
+};
 
 #endif //FEATHERGL_SCENE_H

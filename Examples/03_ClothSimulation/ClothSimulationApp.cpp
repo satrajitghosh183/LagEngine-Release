@@ -11,7 +11,7 @@
 #include "../../Engine/UI/UIRenderer.hpp"
 #include "../../Engine/Platform/Input.hpp"
 #include "../../Engine/Core/Time.hpp"
-#include <glad/glad.h>
+// glad include removed (Vulkan migration)
 #include <imgui.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <filesystem>

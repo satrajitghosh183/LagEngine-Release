@@ -4,7 +4,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
+#include <imgui_impl_vulkan.h>
 #include <GLFW/glfw3.h>
 
 namespace GameEngine {
@@ -40,16 +40,16 @@ namespace GameEngine {
         }
 #endif
 
-        // Setup Platform/Renderer backends
+        // Setup Platform/Renderer backends. The Vulkan backend is initialized
+        // by the engine's render path with full instance/device context;
+        // here we only set up the GLFW platform binding.
         auto* window = static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow());
-        ImGui_ImplGlfw_InitForOpenGL(window, true);
-        ImGui_ImplOpenGL3_Init("#version 420");
+        ImGui_ImplGlfw_InitForVulkan(window, true);
 
-        GE_CORE_INFO("UIRenderer initialized");
+        GE_CORE_INFO("UIRenderer initialized (ImGui Vulkan backend wired by render path)");
     }
 
     void UIRenderer::Shutdown() {
-        ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
 
@@ -57,7 +57,7 @@ namespace GameEngine {
     }
 
     void UIRenderer::BeginFrame() {
-        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
     }
@@ -68,9 +68,9 @@ namespace GameEngine {
         io.DisplaySize = ImVec2(static_cast<float>(window.GetWidth()),
                                static_cast<float>(window.GetHeight()));
 
-        // Rendering
+        // Rendering: the Vulkan backend's RenderDrawData call needs an active
+        // command buffer, so the engine's render path issues that call.
         ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         // Update and render additional platform windows
 #ifdef IMGUI_HAS_VIEWPORT

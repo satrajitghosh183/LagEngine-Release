@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../Core/Base.hpp"
+#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
-#include <glad/glad.h>
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
@@ -37,7 +37,6 @@ namespace GameEngine {
                 float margin = threshold * m_HysteresisMargin;
 
                 if (i == m_CurrentLevel) {
-                    // Hysteresis: require exceeding threshold + margin to switch away
                     if (dist < threshold + margin) return i;
                 } else {
                     if (dist < threshold) return i;
@@ -102,53 +101,14 @@ namespace GameEngine {
         LODStatistics m_Stats;
     };
 
-    // =====================================================================
-    // Occlusion Culling (OpenGL occlusion queries)
-    // =====================================================================
-
-    class OcclusionQuery {
-    public:
-        OcclusionQuery() { glGenQueries(1, &m_QueryID); }
-        ~OcclusionQuery() { if (m_QueryID) glDeleteQueries(1, &m_QueryID); }
-
-        OcclusionQuery(const OcclusionQuery&) = delete;
-        OcclusionQuery& operator=(const OcclusionQuery&) = delete;
-
-        void begin() {
-            glBeginQuery(GL_ANY_SAMPLES_PASSED, m_QueryID);
-            m_Active = true;
-        }
-
-        void end() {
-            glEndQuery(GL_ANY_SAMPLES_PASSED);
-            m_Active = false;
-            m_HasResult = false;
-        }
-
-        bool isResultAvailable() const {
-            if (m_Active) return false;
-            GLuint available = 0;
-            glGetQueryObjectuiv(m_QueryID, GL_QUERY_RESULT_AVAILABLE, &available);
-            return available == GL_TRUE;
-        }
-
-        bool getResult() {
-            GLuint result = 0;
-            glGetQueryObjectuiv(m_QueryID, GL_QUERY_RESULT, &result);
-            m_LastResult = result > 0;
-            m_HasResult = true;
-            return m_LastResult;
-        }
-
-        bool getLastResult() const { return m_LastResult; }
-        GLuint getQueryID() const { return m_QueryID; }
-
-    private:
-        GLuint m_QueryID = 0;
-        bool m_Active = false;
-        bool m_HasResult = false;
-        bool m_LastResult = true;
-    };
+    // =========================================================================
+    // Occlusion Culling (Vulkan timestamp / conditional rendering)
+    //
+    // In Vulkan, hardware occlusion queries are driven by VkQueryPool with
+    // VK_QUERY_TYPE_OCCLUSION.  Each object's bounding box is rendered in a
+    // depth-only pass while a query is active; the result is read back one
+    // frame later to avoid GPU stalls.
+    // =========================================================================
 
     struct AABB {
         glm::vec3 Min = glm::vec3(0.0f);
@@ -158,32 +118,77 @@ namespace GameEngine {
         glm::vec3 extent() const { return (Max - Min) * 0.5f; }
     };
 
+    /**
+     * @brief GPU occlusion-culling system backed by a VkQueryPool.
+     *
+     * Usage per frame:
+     *   1. beginFrame(cmd)        — reset query pool slots
+     *   2. testObject(cmd, id, bounds, pipeline, slot) — vkCmdBeginQuery … render AABB … vkCmdEndQuery
+     *   3. endFrame(cmd)          — vkCmdCopyQueryPoolResults into a readback buffer
+     *   4. collectResults()       — read the readback buffer on CPU (called next frame)
+     *   5. isVisible(id)          — query cached result
+     */
     class OcclusionCullingSystem {
     public:
         OcclusionCullingSystem() = default;
-        ~OcclusionCullingSystem() = default;
+        ~OcclusionCullingSystem();
 
-        void initialize(int maxObjects);
-        void beginFrame();
-        void testObject(uint32_t entityID, const AABB& bounds);
-        void endFrame();
+        OcclusionCullingSystem(const OcclusionCullingSystem&) = delete;
+        OcclusionCullingSystem& operator=(const OcclusionCullingSystem&) = delete;
+
+        /**
+         * @brief Allocate Vulkan resources.
+         * @param maxObjects  Maximum number of objects that can be tested per frame.
+         */
+        void initialize(uint32_t maxObjects);
+
+        /**
+         * @brief Reset per-frame query slots at the start of a frame.
+         */
+        void beginFrame(VkCommandBuffer cmd);
+
+        /**
+         * @brief Record an occlusion query for a single AABB.
+         * @param cmd          Active command buffer (inside a render pass)
+         * @param entityID     Unique identifier for the object
+         * @param bounds       World-space AABB
+         * @param queryIndex   Slot index within the query pool (caller assigns)
+         */
+        void testObject(VkCommandBuffer cmd, uint32_t entityID,
+                         const AABB& bounds, uint32_t queryIndex);
+
+        /**
+         * @brief Copy query results into a host-visible buffer.
+         */
+        void endFrame(VkCommandBuffer cmd, uint32_t queriesUsed);
+
+        /**
+         * @brief Read back results from the previous frame (CPU-side).
+         * Call once after the frame's command buffer has finished executing.
+         */
+        void collectResults(uint32_t queriesUsed,
+                             const std::vector<uint32_t>& entityOrder);
 
         bool isVisible(uint32_t entityID) const;
 
         struct Stats {
-            int TotalTested = 0;
+            int TotalTested  = 0;
             int TotalVisible = 0;
             int TotalOccluded = 0;
         };
         const Stats& getStatistics() const { return m_Stats; }
 
     private:
-        void renderAABB(const AABB& bounds);
+        VkQueryPool m_QueryPool = VK_NULL_HANDLE;
+        uint32_t    m_MaxObjects = 0;
 
-        std::unordered_map<uint32_t, Scope<OcclusionQuery>> m_Queries;
-        std::unordered_map<uint32_t, bool> m_VisibilityCache; // Previous frame results
+        // Readback buffer: one uint64 per query slot
+        VkBuffer      m_ReadbackBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory m_ReadbackMemory = VK_NULL_HANDLE;
+        uint64_t*     m_MappedResults = nullptr; // Persistently mapped
+
+        std::unordered_map<uint32_t, bool> m_VisibilityCache;
         Stats m_Stats;
-        GLuint m_BoxVAO = 0, m_BoxVBO = 0, m_BoxIBO = 0;
         bool m_Initialized = false;
     };
 

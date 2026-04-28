@@ -1,128 +1,197 @@
 #include "VertexArray.hpp"
 #include "../Core/Logger.hpp"
-#include <glad/glad.h>
+#include <cstring>
 
 namespace GameEngine {
 
-    static GLenum ShaderDataTypeToOpenGLBaseType(ShaderDataType type) {
-        switch (type) {
-            case ShaderDataType::Float:
-            case ShaderDataType::Float2:
-            case ShaderDataType::Float3:
-            case ShaderDataType::Float4:
-            case ShaderDataType::Mat3:
-            case ShaderDataType::Mat4:
-                return GL_FLOAT;
-            case ShaderDataType::Int:
-            case ShaderDataType::Int2:
-            case ShaderDataType::Int3:
-            case ShaderDataType::Int4:
-                return GL_INT;
-            case ShaderDataType::Bool:
-                return GL_BOOL;
-            default:
-                GE_CORE_ASSERT(false, "Unknown ShaderDataType!");
-                return 0;
+    // ========== VertexBuffer ==========
+
+    VertexBuffer::VertexBuffer(const void* data, uint32_t size) {
+        CreateBuffer(size, false);
+        if (data) {
+            UploadData(data, size);
         }
     }
 
-    // ========== VertexBuffer ==========
-
     VertexBuffer::VertexBuffer(float* vertices, uint32_t size) {
-        glGenBuffers(1, &m_RendererID);
-        glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
-        glBufferData(GL_ARRAY_BUFFER, size, vertices, GL_STATIC_DRAW);
+        CreateBuffer(size, false);
+        if (vertices) {
+            UploadData(vertices, size);
+        }
     }
 
     VertexBuffer::VertexBuffer(uint32_t size) {
-        glGenBuffers(1, &m_RendererID);
-        glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
-        glBufferData(GL_ARRAY_BUFFER, size, nullptr, GL_DYNAMIC_DRAW);
+        CreateBuffer(size, true);
     }
 
     VertexBuffer::~VertexBuffer() {
-        glDeleteBuffers(1, &m_RendererID);
+        if (m_Buffer != VK_NULL_HANDLE) {
+            auto allocator = VulkanDevice::Get().GetAllocator();
+            vmaDestroyBuffer(allocator, m_Buffer, m_Allocation);
+        }
     }
 
-    void VertexBuffer::Bind() const {
-        glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
+    void VertexBuffer::CreateBuffer(uint32_t size, bool dynamic) {
+        m_Size = size;
+        m_Dynamic = dynamic;
+        auto allocator = VulkanDevice::Get().GetAllocator();
+
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        if (dynamic) {
+            // Host-visible for frequent CPU updates (cloth, particles, etc.)
+            allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+            allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                              VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        } else {
+            // Device-local for static geometry (uploaded via staging buffer)
+            allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        }
+
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &m_Buffer, &m_Allocation, nullptr) != VK_SUCCESS) {
+            GE_CORE_ERROR("Failed to create vertex buffer ({0} bytes)", size);
+        }
     }
 
-    void VertexBuffer::Unbind() const {
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    void VertexBuffer::UploadData(const void* data, uint32_t size) {
+        auto& device = VulkanDevice::Get();
+        auto allocator = device.GetAllocator();
+
+        if (m_Dynamic) {
+            // Direct map for dynamic buffers
+            void* mapped = nullptr;
+            vmaMapMemory(allocator, m_Allocation, &mapped);
+            memcpy(mapped, data, size);
+            vmaUnmapMemory(allocator, m_Allocation);
+            vmaFlushAllocation(allocator, m_Allocation, 0, size);
+        } else {
+            // Stage through host-visible buffer for device-local memory
+            VkBuffer stagingBuffer;
+            VmaAllocation stagingAlloc;
+
+            VkBufferCreateInfo stagingInfo{};
+            stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            stagingInfo.size = size;
+            stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+            VmaAllocationCreateInfo stagingAllocInfo{};
+            stagingAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+            stagingAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                     VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+            vmaCreateBuffer(allocator, &stagingInfo, &stagingAllocInfo,
+                            &stagingBuffer, &stagingAlloc, nullptr);
+
+            void* mapped = nullptr;
+            vmaMapMemory(allocator, stagingAlloc, &mapped);
+            memcpy(mapped, data, size);
+            vmaUnmapMemory(allocator, stagingAlloc);
+            vmaFlushAllocation(allocator, stagingAlloc, 0, size);
+
+            // Copy via single-time command buffer
+            VkCommandBuffer cmd = device.BeginSingleTimeCommands();
+            VkBufferCopy copyRegion{};
+            copyRegion.size = size;
+            vkCmdCopyBuffer(cmd, stagingBuffer, m_Buffer, 1, &copyRegion);
+            device.EndSingleTimeCommands(cmd);
+
+            vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
+        }
     }
 
     void VertexBuffer::SetData(const void* data, uint32_t size) {
-        glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, size, data);
+        UploadData(data, size);
+    }
+
+    void VertexBuffer::Bind(VkCommandBuffer cmd) const {
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &m_Buffer, &offset);
     }
 
     // ========== IndexBuffer ==========
 
-    IndexBuffer::IndexBuffer(uint32_t* indices, uint32_t count)
+    IndexBuffer::IndexBuffer(const uint32_t* indices, uint32_t count)
         : m_Count(count) {
-        glGenBuffers(1, &m_RendererID);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_RendererID);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, count * sizeof(uint32_t), indices, GL_STATIC_DRAW);
+        auto& device = VulkanDevice::Get();
+        auto allocator = device.GetAllocator();
+        uint32_t size = count * sizeof(uint32_t);
+
+        // Create device-local index buffer
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &m_Buffer, &m_Allocation, nullptr);
+
+        // Stage upload
+        VkBuffer stagingBuffer;
+        VmaAllocation stagingAlloc;
+
+        VkBufferCreateInfo stagingInfo{};
+        stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        stagingInfo.size = size;
+        stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+        VmaAllocationCreateInfo stagingAllocInfo{};
+        stagingAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        stagingAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                 VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        vmaCreateBuffer(allocator, &stagingInfo, &stagingAllocInfo,
+                        &stagingBuffer, &stagingAlloc, nullptr);
+
+        void* mapped = nullptr;
+        vmaMapMemory(allocator, stagingAlloc, &mapped);
+        memcpy(mapped, indices, size);
+        vmaUnmapMemory(allocator, stagingAlloc);
+        vmaFlushAllocation(allocator, stagingAlloc, 0, size);
+
+        VkCommandBuffer cmd = device.BeginSingleTimeCommands();
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(cmd, stagingBuffer, m_Buffer, 1, &copyRegion);
+        device.EndSingleTimeCommands(cmd);
+
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
     }
 
     IndexBuffer::~IndexBuffer() {
-        glDeleteBuffers(1, &m_RendererID);
+        if (m_Buffer != VK_NULL_HANDLE) {
+            auto allocator = VulkanDevice::Get().GetAllocator();
+            vmaDestroyBuffer(allocator, m_Buffer, m_Allocation);
+        }
     }
 
-    void IndexBuffer::Bind() const {
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_RendererID);
-    }
-
-    void IndexBuffer::Unbind() const {
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    void IndexBuffer::Bind(VkCommandBuffer cmd) const {
+        vkCmdBindIndexBuffer(cmd, m_Buffer, 0, VK_INDEX_TYPE_UINT32);
     }
 
     // ========== VertexArray ==========
 
-    VertexArray::VertexArray() {
-        glGenVertexArrays(1, &m_RendererID);
-    }
-
-    VertexArray::~VertexArray() {
-        glDeleteVertexArrays(1, &m_RendererID);
-    }
-
-    void VertexArray::Bind() const {
-        glBindVertexArray(m_RendererID);
-    }
-
-    void VertexArray::Unbind() const {
-        glBindVertexArray(0);
+    void VertexArray::Bind(VkCommandBuffer cmd) const {
+        for (const auto& vb : m_VertexBuffers) {
+            vb->Bind(cmd);
+        }
+        if (m_IndexBuffer) {
+            m_IndexBuffer->Bind(cmd);
+        }
     }
 
     void VertexArray::AddVertexBuffer(const Ref<VertexBuffer>& vertexBuffer) {
         GE_CORE_ASSERT(vertexBuffer->GetLayout().GetElements().size(), "Vertex Buffer has no layout!");
-        
-        glBindVertexArray(m_RendererID);
-        vertexBuffer->Bind();
-        
-        const auto& layout = vertexBuffer->GetLayout();
-        for (const auto& element : layout) {
-            glEnableVertexAttribArray(m_VertexBufferIndex);
-            glVertexAttribPointer(
-                m_VertexBufferIndex,
-                element.GetComponentCount(),
-                ShaderDataTypeToOpenGLBaseType(element.Type),
-                element.Normalized ? GL_TRUE : GL_FALSE,
-                layout.GetStride(),
-                (const void*)(intptr_t)element.Offset
-            );
-            m_VertexBufferIndex++;
-        }
-        
         m_VertexBuffers.push_back(vertexBuffer);
     }
 
     void VertexArray::SetIndexBuffer(const Ref<IndexBuffer>& indexBuffer) {
-        glBindVertexArray(m_RendererID);
-        indexBuffer->Bind();
-        
         m_IndexBuffer = indexBuffer;
     }
 }

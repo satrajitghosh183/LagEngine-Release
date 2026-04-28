@@ -2,7 +2,7 @@
 #include "../../Engine/Core/EntryPoint.hpp"
 #include "../../Engine/Platform/Input.hpp"
 #include <imgui.h>
-#include <glad/glad.h>
+// glad include removed (Vulkan migration)
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <ctime>

@@ -9,7 +9,7 @@
 #include "AABBHelper.h"
 
 #include <glm/gtx/norm.hpp>
-#include "imgui/imgui.h"
+#include <imgui.h>
 #include "physics/PhysicsBodyHelper.h"
 
 /*void showNormals(Mesh *mesh, Scene &scene) {

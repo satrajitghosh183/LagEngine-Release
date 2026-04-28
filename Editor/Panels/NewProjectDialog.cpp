@@ -3,7 +3,7 @@
 #include "../../Engine/Core/ProjectFile.hpp"
 
 #include <imgui.h>
-#include <glad/glad.h>
+#include <backends/imgui_impl_vulkan.h>
 #include <glm/glm.hpp>
 #include <filesystem>
 #include <vector>
@@ -94,27 +94,11 @@ namespace GameEngine {
         }
     }
 
-    // Upload pixels to a new GL texture and return its ID
-    static uint32_t UploadTexture(const std::vector<uint8_t>& pixels, int W)
-    {
-        uint32_t texId = 0;
-        glGenTextures(1, &texId);
-        glBindTexture(GL_TEXTURE_2D, texId);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, W, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        return texId;
-    }
-
     // -------------------------------------------------------------------------
-    // GenerateThumbnailTexture – one distinct look per template type
+    // GenerateThumbnail – one distinct look per template type
     // -------------------------------------------------------------------------
-    uint32_t NewProjectDialog::GenerateThumbnailTexture(const std::string& name,
-                                                         const std::string& category)
+    void NewProjectDialog::GenerateThumbnail(const std::string& name,
+                                              const std::string& category)
     {
         const int W = kThumbSize;
         std::vector<uint8_t> px(W * W * 4, 0);
@@ -132,7 +116,6 @@ namespace GameEngine {
         if (has("Deferred") || has("Render") || category == "Graphics")
         {
             BG(22,22,55, 48,42,85);
-            // Physically-shaded sphere
             float cx = W*0.42f, cy = W*0.52f, rad = W*0.36f;
             glm::vec3 ldir = glm::normalize(glm::vec3(0.55f, 0.75f, 0.35f));
             for (int y = 0; y < W; y++) {
@@ -152,7 +135,6 @@ namespace GameEngine {
                     }
                 }
             }
-            // Second smaller sphere (light)
             float cx2 = W*0.75f, cy2 = W*0.28f, rad2 = W*0.16f;
             for (int y = 0; y < W; y++) {
                 for (int x = 0; x < W; x++) {
@@ -163,7 +145,6 @@ namespace GameEngine {
                     }
                 }
             }
-            // Floor grid
             for (int gx = 0; gx < W; gx += 18) DL(gx,W-10,gx+12,W-2, 50,55,70);
             FR(0, W-4, W, 4, 40,44,56);
         }
@@ -172,7 +153,6 @@ namespace GameEngine {
         else if (has("SPH") || has("Fluid") || category == "Fluid")
         {
             BG(18,62,108, 28,95,155);
-            // Wavy fluid body
             for (int x = 0; x < W; x++) {
                 int waveY = (int)(W*0.42f + 9.f*sinf(x*0.18f) + 4.f*sinf(x*0.35f+1.2f));
                 for (int y = waveY; y < W-4; y++) {
@@ -183,12 +163,10 @@ namespace GameEngine {
                        (uint8_t)(155 + 70*(1-d)));
                 }
             }
-            // White foam crest along wave
             for (int x = 0; x < W; x++) {
                 int waveY = (int)(W*0.42f + 9.f*sinf(x*0.18f) + 4.f*sinf(x*0.35f+1.2f));
                 for (int t = -1; t <= 1; t++) SP(x, waveY+t, 200,230,255);
             }
-            // Splash droplets above wave
             uint32_t seed = 0xBEEF;
             for (int i = 0; i < 35; i++) {
                 seed = seed*1664525u + 1013904223u;
@@ -204,72 +182,58 @@ namespace GameEngine {
         else if (has("Robot") || category == "Robotics")
         {
             BG(48,52,68, 72,80,105);
-            // Base platform
             FR(38, 104, 52, 12, 75, 80, 95);
             FR(38, 102, 52,  3, 95,100,118);
-            // Joint 0 (base)
             FC(64, 103, 9, 130,135,155);
-            // Segment 1 (angled left-up)
             for (int i = 0; i < 38; i++) {
                 int ax = 64 - (int)(i*0.15f);
                 int ay = 103 - i;
                 FR(ax-5, ay, 10, 3, 155,160,180);
             }
-            // Joint 1
             FC(57, 65, 7, 130,135,155);
-            // Segment 2 (angled right-up)
             for (int i = 0; i < 32; i++) {
                 int ax = 57 + (int)(i*0.9f);
                 int ay = 65 - (int)(i*0.5f);
                 FR(ax-4, ay, 8, 3, 145,150,170);
             }
-            // Joint 2
             FC(86, 49, 6, 130,135,155);
-            // Segment 3 (short, right-down)
             for (int i = 0; i < 18; i++) {
                 int ax = 86 + (int)(i*0.7f);
                 int ay = 49 + (int)(i*0.6f);
                 FR(ax-3, ay, 6, 3, 140,145,165);
             }
-            // End effector gripper
             FC(99, 59, 5, 130,135,155);
             FR(94, 59, 3, 14, 185,190,210);
             FR(101,59, 3, 14, 185,190,210);
-            // Floor grid lines
             FR(0, 116, W, 2, 55,60,72);
             for (int gx = 5; gx < W; gx += 14) DL(gx,116,gx-5,W-2, 48,52,64);
-            // Axis gizmo (bottom-left)
-            DL(12,108, 22,108, 220,60,60);   // X red
-            DL(12,108, 12, 98, 60,200,60);   // Y green
-            DL(12,108, 19,101, 60,100,220);  // Z blue
+            DL(12,108, 22,108, 220,60,60);
+            DL(12,108, 12, 98, 60,200,60);
+            DL(12,108, 19,101, 60,100,220);
         }
 
         // ---- Particle Cannon ----
         else if (has("Cannon"))
         {
             BG(28,28,68, 52,50,110);
-            // Ground
             FR(0, 100, W, 5, 55,58,72);
             FR(0,  98, W, 3, 70,73,88);
-            // Cannon barrel (bottom-left corner, angled ~40°)
             for (int i = 0; i < 32; i++) {
                 int bx = 14 + (int)(i*0.77f);
                 int by = 98 - (int)(i*0.64f);
                 FR(bx-4, by-4, 8, 8, 90,95,115);
             }
-            FC(14, 98, 9, 110,115,135); // base
-            // Parabolic arc of projectiles (20 dots)
+            FC(14, 98, 9, 110,115,135);
             for (int i = 0; i < 22; i++) {
                 float t = i / 21.f;
                 int ax = (int)(40 + t*82.f);
-                int ay = (int)(85 - 62.f*(4*t*(1-t)));  // parabola peak ~mid
+                int ay = (int)(85 - 62.f*(4*t*(1-t)));
                 float age = t;
                 uint8_t r = (uint8_t)(255);
                 uint8_t g = (uint8_t)(80 + 160*age);
                 uint8_t b = (uint8_t)(30*(1-age));
                 FC(ax, ay, (i%3==0)?3:2, r, g, b);
             }
-            // Impact flash at right
             FC(122, 85, 6, 255,220,100);
             FC(122, 85, 3, 255,255,200);
         }
@@ -278,11 +242,9 @@ namespace GameEngine {
         else if (has("Cloth") || has("Flag"))
         {
             BG(22,72,32, 42,115,52);
-            // Cloth mesh: 10×8 grid with sine-wave deformation
             const int GW = 10, GH = 8;
             float cellX = (W-20.f)/GW;
             float cellY = (W-24.f)/GH;
-            // Horizontal strands
             for (int gy = 0; gy <= GH; gy++) {
                 for (int gx = 0; gx < GW; gx++) {
                     float w0 = 6.f*sinf(gx*0.45f + gy*0.28f);
@@ -292,7 +254,6 @@ namespace GameEngine {
                     DL(x0,y0,x1,y1, 70,190,100);
                 }
             }
-            // Vertical strands
             for (int gx = 0; gx <= GW; gx++) {
                 for (int gy = 0; gy < GH; gy++) {
                     float w0 = 6.f*sinf(gx*0.45f + gy*0.28f);
@@ -302,14 +263,12 @@ namespace GameEngine {
                     DL(x0,y0,x1,y1, 55,165,80);
                 }
             }
-            // Nodes
             for (int gy = 0; gy <= GH; gy++)
                 for (int gx = 0; gx <= GW; gx++) {
                     float w = 6.f*sinf(gx*0.45f + gy*0.28f);
                     int nx = (int)(10+gx*cellX), ny = (int)(12+gy*cellY+w);
                     FC(nx, ny, 2, 160,255,160);
                 }
-            // Fixed-pin highlight on top row
             for (int gx = 0; gx <= GW; gx++) {
                 int nx = (int)(10+gx*cellX);
                 FC(nx, 12, 3, 255,200,80);
@@ -320,7 +279,6 @@ namespace GameEngine {
         else if (has("Soft") || has("XPBD") || has("SoftBody"))
         {
             BG(62,22,108, 92,38,148);
-            // Blob: irregular filled shape via overlapping circles
             int cx = W/2, cy = W/2+8, numPts = 14;
             for (int i = 0; i < numPts; i++) {
                 float a = i * 6.2832f / numPts;
@@ -332,10 +290,8 @@ namespace GameEngine {
                 FC(bx, by, 14, cr, cg, 230);
             }
             FC(cx, cy, 22, 185, 105, 245);
-            // Specular highlight
             FC(cx-10, cy-13, 7, 225, 190, 255);
             FC(cx- 7, cy-10, 3, 255, 240, 255);
-            // Constraint edges (XPBD spring lines)
             for (int i = 0; i < numPts; i++) {
                 float a0 = i * 6.2832f / numPts;
                 float a1 = (i+1) * 6.2832f / numPts;
@@ -345,7 +301,6 @@ namespace GameEngine {
                 int x1 = cx+(int)(r1*cosf(a1)), y1 = cy+(int)(r1*sinf(a1));
                 DL(x0,y0,x1,y1, 120,60,180);
             }
-            // Floor shadow
             FR(0, W-4, W, 4, 50,30,72);
         }
 
@@ -353,7 +308,6 @@ namespace GameEngine {
         else if (has("2D") || has("Platformer") || category == "2D")
         {
             BG(25,42,100, 48,72,152);
-            // Stars
             uint32_t seed = 0xCAFE;
             for (int i = 0; i < 30; i++) {
                 seed = seed*1664525u+1013904223u;
@@ -362,21 +316,16 @@ namespace GameEngine {
                 int sy = (seed>>24)%(W/2);
                 SP(sx, sy, 220,225,235);
             }
-            // Moon
             FC(102, 18, 10, 240,240,200);
-            FC(107, 14,  8, 28,36,64);  // crescent cut
-            // Ground
+            FC(107, 14,  8, 28,36,64);
             FR(0, 106, W, 14, 68, 108, 52);
             FR(0, 104, W,  4, 88, 140, 62);
-            // Platforms
             FR(10, 78, 32, 8, 68,108,52); FR(10, 76, 32, 3, 88,140,62);
             FR(55, 58, 36, 8, 68,108,52); FR(55, 56, 36, 3, 88,140,62);
             FR(82, 84, 32, 8, 68,108,52); FR(82, 82, 32, 3, 88,140,62);
-            // Character on first platform
-            FR(20, 90, 10, 14, 230, 90, 70);   // body
-            FR(22, 85,  7,  7, 250,195,145);   // head
-            SP(24, 87, 40,40,40); SP(27, 87, 40,40,40); // eyes
-            // Coin
+            FR(20, 90, 10, 14, 230, 90, 70);
+            FR(22, 85,  7,  7, 250,195,145);
+            SP(24, 87, 40,40,40); SP(27, 87, 40,40,40);
             FC(70, 50, 5, 255,210,40);
             FC(70, 50, 3, 255,240,120);
         }
@@ -386,10 +335,8 @@ namespace GameEngine {
         {
             BG(8,8,22, 22,16,42);
             int emitX = W/2, emitY = W-12;
-            // Emitter glow
             FC(emitX, emitY, 7, 255,180,60);
             FC(emitX, emitY, 4, 255,240,160);
-            // Particle spray (fountain)
             uint32_t seed = 0xF00D;
             for (int i = 0; i < 90; i++) {
                 seed = seed*1664525u+1013904223u;
@@ -400,7 +347,6 @@ namespace GameEngine {
                 float age = (float)((seed>>20)%100)/100.f;
                 float ppx = emitX + cosf(angle)*speed*age;
                 float ppy = emitY - sinf(angle)*speed*age + 9.8f*age*age*8.f;
-                // Hot → cool color ramp: white→yellow→orange→red→dark
                 uint8_t r = (uint8_t)fminf(255.f, 255.f);
                 uint8_t g = (uint8_t)fminf(255.f, 220.f*(1-age*0.7f));
                 uint8_t b = (uint8_t)fminf(255.f, 60.f*(1-age));
@@ -408,10 +354,8 @@ namespace GameEngine {
                 int px2 = (int)ppx, py2 = (int)ppy;
                 if (px2>=0&&px2<W&&py2>=0&&py2<W)
                     ThumbSetPixel(px, W, px2, py2, r, g, b, a2);
-                // Occasional bigger spark
                 if (i%7==0) FC((int)ppx,(int)ppy, 2, r, g, b);
             }
-            // Floor
             FR(0, W-5, W, 5, 38,38,50);
         }
 
@@ -419,22 +363,17 @@ namespace GameEngine {
         else
         {
             BG(38,55,120, 58,82,160);
-            // Floor
             FR(0, 106, W, 10, 65,70,88);
             FR(0, 104, W,  3, 85,90,108);
-            // Box 1 – red, top-left, falling
             FR(10, 16, 24, 24, 195,55,55);
-            FR(10, 16, 24,  3, 240,80,80);   // top edge highlight
-            FR(10, 16,  3, 24, 240,80,80);   // left edge highlight
-            // Box 2 – orange, center-mid
+            FR(10, 16, 24,  3, 240,80,80);
+            FR(10, 16,  3, 24, 240,80,80);
             FR(50, 52, 24, 24, 205,125,35);
             FR(50, 52, 24,  3, 245,155,55);
             FR(50, 52,  3, 24, 245,155,55);
-            // Box 3 – yellow, right, near floor
             FR(90, 78, 22, 22, 215,198,35);
             FR(90, 78, 22,  3, 248,228,55);
             FR(90, 78,  3, 22, 248,228,55);
-            // Gravity arrows under each box
             auto arrow = [&](int ax, int topY) {
                 DL(ax, topY, ax, topY+12, 100,130,210);
                 DL(ax, topY+12, ax-3, topY+7, 100,130,210);
@@ -443,31 +382,41 @@ namespace GameEngine {
             arrow(22, 42);
             arrow(62, 78);
             arrow(101,102);
-            // Small sphere in top-right
             FC(110, 22, 10, 80,180,240);
-            FC(106, 18,  4, 160,220,255);  // specular
+            FC(106, 18,  4, 160,220,255);
         }
 
-        return UploadTexture(px, W);
+        // Upload pixels to a Vulkan texture and register with ImGui
+        ThumbnailEntry entry;
+        entry.Texture = CreateRef<Texture2D>(static_cast<uint32_t>(W),
+                                              static_cast<uint32_t>(W),
+                                              TextureFormat::RGBA);
+        entry.Texture->SetData(px.data(), static_cast<uint32_t>(px.size()));
+        entry.ImGuiDescriptor = ImGui_ImplVulkan_AddTexture(
+            entry.Texture->GetSampler(),
+            entry.Texture->GetImageView(),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_Thumbnails.push_back(std::move(entry));
     }
 
     // -------------------------------------------------------------------------
     void NewProjectDialog::InitThumbnails()
     {
         const auto& templates = TemplateManager::GetTemplates();
-        m_ThumbnailTextures.clear();
-        m_ThumbnailTextures.reserve(templates.size());
+        m_Thumbnails.clear();
+        m_Thumbnails.reserve(templates.size());
         for (const auto& tmpl : templates)
-            m_ThumbnailTextures.push_back(
-                GenerateThumbnailTexture(tmpl.Name, tmpl.Category));
+            GenerateThumbnail(tmpl.Name, tmpl.Category);
         m_ThumbnailsInitialized = true;
     }
 
     void NewProjectDialog::CleanupThumbnails()
     {
-        for (uint32_t id : m_ThumbnailTextures)
-            if (id) glDeleteTextures(1, &id);
-        m_ThumbnailTextures.clear();
+        for (auto& entry : m_Thumbnails) {
+            if (entry.ImGuiDescriptor != VK_NULL_HANDLE)
+                ImGui_ImplVulkan_RemoveTexture(entry.ImGuiDescriptor);
+        }
+        m_Thumbnails.clear();
         m_ThumbnailsInitialized = false;
     }
 
@@ -483,7 +432,7 @@ namespace GameEngine {
             m_PendingOpen = false;
         }
 
-        // Generate thumbnails once (needs GL context → do it here, not in Open())
+        // Generate thumbnails once (needs Vulkan context → do it here, not in Open())
         if (!m_ThumbnailsInitialized)
             InitThumbnails();
 
@@ -529,14 +478,13 @@ namespace GameEngine {
                     IM_COL32(35,75,155,90), 4.f);
             }
 
-            // Draw thumbnail using ImGui::Image (UV flipped Y: top-to-bottom pixels)
-            ImTextureID texId = (i < (int)m_ThumbnailTextures.size() && m_ThumbnailTextures[i])
-                ? (ImTextureID)(uintptr_t)m_ThumbnailTextures[i]
-                : (ImTextureID)(uintptr_t)0;
+            // Draw thumbnail using ImGui::Image with Vulkan descriptor set
+            ImTextureID texId = (i < (int)m_Thumbnails.size() && m_Thumbnails[i].ImGuiDescriptor)
+                ? (ImTextureID)m_Thumbnails[i].ImGuiDescriptor
+                : (ImTextureID)nullptr;
 
             if (texId) {
-                ImGui::Image(texId, ImVec2(imgW, kImgH),
-                             ImVec2(0.f, 1.f), ImVec2(1.f, 0.f));  // Y-flip
+                ImGui::Image(texId, ImVec2(imgW, kImgH));
             } else {
                 // Placeholder rect when no texture
                 dl->AddRectFilled(cardTopLeft,

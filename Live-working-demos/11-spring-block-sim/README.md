@@ -1,26 +1,23 @@
 # 11 - Spring Block Simulator
 
-Hyperrealistic spring-mass block simulator with PBR rendering, bloom, shadow mapping, and an ImGui control panel. Foundational prototype for the LAGEngine physics constraint system and PBR material pipeline.
+Hyperrealistic spring-mass block simulator with PBR rendering and an ImGui control panel. Foundational prototype for the LAGEngine physics constraint system and PBR material pipeline.
 
 ## Features
 
 - **Spring-mass dynamics** with configurable stiffness, damping, and rest length
-- **PBR rendering** (metallic-roughness workflow) with HDR lighting
-- **Shadow mapping** (2048x2048 directional shadow map)
-- **Bloom post-processing** with configurable threshold and strength
-- **Tone mapping** (HDR to LDR exposure control)
+- **PBR rendering** (metallic-roughness workflow) with directional lighting
 - **Interactive block dragging** with ray-cast picking (slab AABB method)
 - **Orbit camera** (right-click orbit, middle-click pan, scroll zoom)
 - **ImGui control panel** for adding/removing blocks and springs, tweaking physics and materials
+- **Wireframe mode** toggle
 
 ## Dependencies
 
-All dependencies are fetched automatically via CMake FetchContent:
-- **GLFW 3.4** - windowing
-- **GLM 1.0.1** - math
-- **ImGui 1.90.1** - UI
-- **GLAD** - OpenGL loader (vendored in `external/glad/`)
-- **OpenGL 3.3+** - rendering
+- **Vulkan SDK** (with shaderc for runtime GLSL compilation)
+- **VulkanBase** shared library (from `../common/`)
+- **GLFW** - windowing (via VulkanBase)
+- **GLM** - math (via VulkanBase)
+- **ImGui** - UI with Vulkan backend (via VulkanBase)
 
 ## Build
 
@@ -30,9 +27,14 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build . -j$(nproc)
 ```
 
-Run from the build directory (shaders are copied automatically):
+Or use the script:
 ```bash
-./SpringBlockSim
+./build_sim.sh Release
+```
+
+Run:
+```bash
+./build/SpringBlockSim
 ```
 
 ## Controls
@@ -50,9 +52,7 @@ Run from the build directory (shaders are copied automatically):
 | File | Purpose |
 |------|---------|
 | `Physics.h/cpp` | Block/Spring structs, PhysicsWorld with sub-stepping integrator |
-| `Renderer.h/cpp` | Multi-pass PBR renderer (shadow, color, bloom, tonemap) |
+| `Renderer.h/cpp` | Vulkan PBR renderer with push constants and runtime shader compilation |
 | `SpringMesh.h/cpp` | Procedural coil mesh generation for spring visualization |
 | `Camera.h/cpp` | Orbit camera with projection/view matrix generation |
-| `Shader.h/cpp` | GLSL shader loader with uniform helpers |
 | `UI.h/cpp` | ImGui panels for scene editing and render config |
-| `shaders/` | PBR, shadow, bloom, ground, and tonemap GLSL shaders |

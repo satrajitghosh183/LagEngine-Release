@@ -3,6 +3,9 @@ project(XPBDSoftBody LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Add the shared VulkanBase library
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common ${CMAKE_CURRENT_BINARY_DIR}/common)
+
 include_directories(core/materials core core/utils core/meshes core/lights core/cameras ${CMAKE_SOURCE_DIR})
 file(GLOB SRCS ./*.h ./*.cpp
         ./core/*.cpp ./core/*.h
@@ -13,11 +16,9 @@ file(GLOB SRCS ./*.h ./*.cpp
         core/utils/*.cpp core/utils/*.h
         core/physics/*.cpp core/physics/*.h
         core/shadows/*.cpp core/shadows/*.h
-        imgui/*.cpp imgui/*.h
 )
 
-
-add_executable(XPBDSoftBody ${SRCS} ${IMGUI_SRC}
+add_executable(XPBDSoftBody ${SRCS}
         core/physics/UniformAccelerationField.h
         core/physics/DihedralBendConstraint.h
         core/physics/ConstraintHelper.h
@@ -31,18 +32,31 @@ add_executable(XPBDSoftBody ${SRCS} ${IMGUI_SRC}
 
 file(COPY assets DESTINATION ${CMAKE_BINARY_DIR})
 
-find_package(glfw3 REQUIRED)
-message(STATUS "Found GLFW3")
-
-find_package(glm REQUIRED)
-message(STATUS "GLM included")
-
-target_link_libraries(${PROJECT_NAME} glfw glm::glm)
-
-target_sources(${PROJECT_NAME} PRIVATE glad/src/glad.c)
-target_include_directories(${PROJECT_NAME} PRIVATE glad/include/)
+target_link_libraries(${PROJECT_NAME} VulkanBase)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
+
+# Eigen
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Eigen)
+
+# shaderc for runtime GLSL->SPIR-V compilation
+find_package(Vulkan REQUIRED)
+if(TARGET Vulkan::shaderc_combined)
+    target_link_libraries(${PROJECT_NAME} Vulkan::shaderc_combined)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_SHADERC=1)
+elseif(EXISTS "${Vulkan_INCLUDE_DIR}/../Lib/shaderc_combined.lib")
+    target_link_libraries(${PROJECT_NAME} "${Vulkan_INCLUDE_DIR}/../Lib/shaderc_combined.lib")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_SHADERC=1)
+else()
+    # Try pkg-config as fallback
+    find_library(SHADERC_LIB shaderc_combined)
+    if(SHADERC_LIB)
+        target_link_libraries(${PROJECT_NAME} ${SHADERC_LIB})
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_SHADERC=1)
+    else()
+        message(WARNING "shaderc not found - runtime shader compilation disabled, using embedded SPIR-V only")
+    endif()
+endif()
 
 # Optimization
 if(MSVC)

@@ -6,7 +6,8 @@
 #define FEATHERGL_RENDERABLE_H
 
 #include <glm/glm.hpp>
-#include "Shader.h"
+
+class Shader;
 
 class Renderable {
 public:

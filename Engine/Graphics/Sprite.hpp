@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../Core/Base.hpp"
+#include "Texture2D.hpp"
+#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <string>
 #include <cstdint>
@@ -8,11 +10,19 @@
 namespace GameEngine {
 
     /**
-     * @brief 2D sprite with texture region, tint, flip, pivot, and sorting support
+     * @brief 2D sprite with texture region, tint, flip, pivot, and sorting support.
      *
-     * Represents a rectangular region of a texture that can be drawn by the
-     * BatchRenderer2D.  Supports atlas/spritesheet workflows: create from a
-     * full texture, a sub-rectangle, or by slicing a grid.
+     * Represents a rectangular region of a Texture2D that can be submitted to
+     * BatchRenderer2D.  Supports atlas / spritesheet workflows:
+     *   - Create from a file (loads a Texture2D internally)
+     *   - Create from an existing Texture2D + optional sub-rectangle
+     *   - Slice a uniform grid (spritesheet)
+     *
+     * The texture is stored as a Ref<Texture2D> (Vulkan VkImage + VkSampler).
+     * The textureID getter returns a VkDescriptorImageInfo-compatible opaque
+     * handle (the VkImageView cast to uint64_t) for backward-compat with code
+     * that uses uint32_t IDs — prefer getTexture() / getDescriptorInfo() in
+     * new Vulkan-aware code.
      *
      * Usage:
      *   auto sprite = Sprite::createFromFile("assets/player.png");
@@ -20,7 +30,7 @@ namespace GameEngine {
      *   sprite.setFlipX(true);
      *
      *   // Atlas workflow
-     *   auto frame = Sprite::createFromGrid(atlasTexID, 512, 512, 4, 4, 0);
+     *   auto frame = Sprite::createFromGrid(atlasTexture, 4, 4, 0);
      */
     class Sprite {
     public:
@@ -31,52 +41,50 @@ namespace GameEngine {
         // Factory helpers
         // -------------------------------------------------------------------
 
-        /**
-         * @brief Create a sprite that covers the full texture loaded from disk.
-         * @param filePath  Path to the image file (PNG, JPG, etc.)
-         * @return Configured Sprite (texture ID is 0 if loading fails)
-         */
+        /** @brief Load a texture from disk and build a full-frame sprite. */
         static Sprite createFromFile(const std::string& filePath);
 
-        /**
-         * @brief Create a sprite from an existing OpenGL texture ID.
-         */
-        static Sprite createFromTexture(uint32_t textureID, int textureWidth, int textureHeight);
+        /** @brief Build a sprite from an existing Texture2D (full frame). */
+        static Sprite createFromTexture(const Ref<Texture2D>& texture);
 
         /**
-         * @brief Create a sprite from a specific pixel rectangle in a texture.
+         * @brief Build a sprite from a pixel sub-rectangle of a texture.
+         * @param regionX  Pixel X of the top-left corner
+         * @param regionY  Pixel Y of the top-left corner
+         * @param regionW  Width in pixels
+         * @param regionH  Height in pixels
          */
-        static Sprite createFromRegion(uint32_t textureID, int textureWidth, int textureHeight,
-                                       int regionX, int regionY, int regionW, int regionH);
+        static Sprite createFromRegion(const Ref<Texture2D>& texture,
+                                       int regionX, int regionY,
+                                       int regionW, int regionH);
 
         /**
-         * @brief Create a sprite by indexing into a uniform grid (spritesheet).
-         * @param cols       Number of columns in the grid
-         * @param rows       Number of rows in the grid
-         * @param index      Zero-based cell index (row-major)
+         * @brief Slice a uniform grid and return the sprite for cell [index].
+         * @param cols  Number of columns
+         * @param rows  Number of rows
+         * @param index Zero-based cell index (row-major)
          */
-        static Sprite createFromGrid(uint32_t textureID, int textureWidth, int textureHeight,
+        static Sprite createFromGrid(const Ref<Texture2D>& texture,
                                      int cols, int rows, int index);
 
         // -------------------------------------------------------------------
-        // Texture
+        // Texture access
         // -------------------------------------------------------------------
 
-        void setTextureID(uint32_t id) { m_TextureID = id; }
-        uint32_t getTextureID() const { return m_TextureID; }
+        void setTexture(const Ref<Texture2D>& tex) { m_Texture = tex; }
+        const Ref<Texture2D>& getTexture() const { return m_Texture; }
 
-        void setTextureSize(int w, int h) { m_TextureWidth = w; m_TextureHeight = h; }
-        int getTextureWidth() const { return m_TextureWidth; }
-        int getTextureHeight() const { return m_TextureHeight; }
+        /** @brief Get descriptor info for binding to a descriptor set. */
+        VkDescriptorImageInfo getDescriptorInfo() const;
 
         // -------------------------------------------------------------------
         // Source rectangle (UV)
         // -------------------------------------------------------------------
 
-        /** Set the source rectangle in normalised UV coordinates [0..1]. */
+        /** Set UV rectangle in normalised [0..1] coordinates. */
         void setUVRect(const glm::vec2& uvMin, const glm::vec2& uvMax);
 
-        /** Set the source rectangle in pixel coordinates. */
+        /** Set UV rectangle from pixel coordinates within the texture. */
         void setSourceRect(int x, int y, int w, int h);
 
         const glm::vec2& getUVMin() const { return m_UVMin; }
@@ -94,7 +102,7 @@ namespace GameEngine {
         bool getFlipX() const { return m_FlipX; }
         bool getFlipY() const { return m_FlipY; }
 
-        /** Pivot / origin for rotation, in normalised [0..1] range.  (0.5,0.5) = center. */
+        /** Pivot / origin for rotation, normalised [0..1].  (0.5,0.5) = center. */
         void setPivot(const glm::vec2& pivot) { m_Pivot = pivot; }
         const glm::vec2& getPivot() const { return m_Pivot; }
 
@@ -111,40 +119,32 @@ namespace GameEngine {
         void setOrderInLayer(int order) { m_OrderInLayer = order; }
         int getOrderInLayer() const { return m_OrderInLayer; }
 
-        /**
-         * @brief Compute a 64-bit sort key: high 32 bits = layer, low 32 bits = order.
-         */
+        /** Compute a 64-bit sort key: high 32 bits = layer, low 32 bits = order. */
         int64_t getSortKey() const;
 
         // -------------------------------------------------------------------
         // Helpers
         // -------------------------------------------------------------------
 
-        /**
-         * @brief Return UVs with flip applied (ready for vertex submission).
-         * @param outMin  receives the effective min UV
-         * @param outMax  receives the effective max UV
-         */
+        /** Return UVs with flip applied (ready for vertex submission). */
         void getEffectiveUVs(glm::vec2& outMin, glm::vec2& outMax) const;
 
     private:
-        uint32_t m_TextureID = 0;
-        int m_TextureWidth = 0;
-        int m_TextureHeight = 0;
+        Ref<Texture2D> m_Texture;
 
         glm::vec2 m_UVMin = {0.0f, 0.0f};
         glm::vec2 m_UVMax = {1.0f, 1.0f};
 
         glm::vec4 m_Color = {1.0f, 1.0f, 1.0f, 1.0f};
 
-        bool m_FlipX = false;
-        bool m_FlipY = false;
+        bool      m_FlipX = false;
+        bool      m_FlipY = false;
 
         glm::vec2 m_Pivot = {0.5f, 0.5f};
-        glm::vec2 m_Size = {1.0f, 1.0f};
+        glm::vec2 m_Size  = {1.0f, 1.0f};
 
-        int m_SortingLayer = 0;
-        int m_OrderInLayer = 0;
+        int m_SortingLayer  = 0;
+        int m_OrderInLayer  = 0;
     };
 
 } // namespace GameEngine

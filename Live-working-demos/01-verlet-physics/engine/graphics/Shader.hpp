@@ -1,7 +1,9 @@
-
-
-
-// Shader.hpp
+// Shader.hpp -- Vulkan-compatible shader wrapper (stub)
+//
+// In the Vulkan port the entry points compile GLSL -> SPIR-V via shaderc
+// and create VkShaderModules directly through VulkanBase.  This class is
+// retained so that engine code that references Shader still compiles, but
+// all legacy functionality has been removed.
 #pragma once
 
 #include <string>
@@ -11,29 +13,29 @@ namespace engine::graphics {
 
 class Shader {
 public:
-    Shader(const std::string& vertexPath, const std::string& fragmentPath);
-    ~Shader();
+    /// Construct from GLSL source file paths (no-op in Vulkan build).
+    Shader(const std::string& /*vertexPath*/, const std::string& /*fragmentPath*/) {}
+    ~Shader() = default;
 
-    void bind() const;
-    void unbind() const;
-    void setMaterial(const std::string& prefix, const glm::vec3& ambient, const glm::vec3& diffuse, const glm::vec3& specular, float shininess) const;
-    void setLight(const std::string& prefix, const glm::vec3& position, const glm::vec3& ambient, const glm::vec3& diffuse, const glm::vec3& specular) const;
+    // ---- Pipeline binding (no-ops -- pipeline binding is done at command buffer level) ----
+    void bind() const {}
+    void unbind() const {}
 
-    void setUniformMat4(const std::string& name, const glm::mat4& matrix) const;
-    void setUniformVec3(const std::string& name, const glm::vec3& vector) const;
-    void setUniformFloat(const std::string& name, float value) const;
-    void setUniformInt(const std::string& name, int value) const;
-    void setMat4(const std::string& name, const glm::mat4& mat) const;
-    void setVec3(const std::string& name, const glm::vec3& value) const;
-    void setFloat(const std::string& name, float value) const;
-    bool isValid() const { return programID != 0; }
+    // ---- Uniform helpers (no-ops -- uniforms are push constants in Vulkan) ----
+    void setMaterial(const std::string&, const glm::vec3&, const glm::vec3&,
+                     const glm::vec3&, float) const {}
+    void setLight(const std::string&, const glm::vec3&, const glm::vec3&,
+                  const glm::vec3&, const glm::vec3&) const {}
 
-private:
-    unsigned int programID;
+    void setUniformMat4(const std::string&, const glm::mat4&) const {}
+    void setUniformVec3(const std::string&, const glm::vec3&) const {}
+    void setUniformFloat(const std::string&, float) const {}
+    void setUniformInt(const std::string&, int) const {}
+    void setMat4(const std::string&, const glm::mat4&) const {}
+    void setVec3(const std::string&, const glm::vec3&) const {}
+    void setFloat(const std::string&, float) const {}
 
-    std::string loadShaderSource(const std::string& filepath) const;
-    unsigned int compileShader(unsigned int type, const std::string& source) const;
-    void linkProgram(unsigned int vertexShader, unsigned int fragmentShader);
+    bool isValid() const { return true; }
 };
 
 } // namespace engine::graphics

@@ -1,3 +1,8 @@
+// engine/graphics/MeshGenerator.cpp
+//
+// Procedural mesh generators. In the Vulkan build, upload() without a
+// VulkanBase reference is a no-op that only sets the useIndices flag.
+// The caller is responsible for GPU upload via vk-aware overloads.
 #include "engine/graphics/MeshGenerator.hpp"
 #include <glm/gtc/constants.hpp>
 #include <cmath>
@@ -30,7 +35,7 @@ Mesh MeshGenerator::Grid(int width, int height, float spacing) {
         }
     }
 
-    mesh.upload();
+    mesh.upload(); // CPU-side flag only in Vulkan build
     return mesh;
 }
 
@@ -68,7 +73,7 @@ Mesh MeshGenerator::Sphere(float radius, int stacks, int slices) {
         }
     }
 
-    mesh.upload();
+    mesh.upload(); // CPU-side flag only in Vulkan build
     return mesh;
 }
 
@@ -87,7 +92,7 @@ Mesh MeshGenerator::Plane(float size) {
         2, 3, 0
     };
 
-    mesh.upload();
+    mesh.upload(); // CPU-side flag only in Vulkan build
     return mesh;
 }
 

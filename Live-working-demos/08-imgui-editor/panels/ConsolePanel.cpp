@@ -16,7 +16,7 @@ ConsolePanel::ConsolePanel()
     
     // Add some demo log entries
     info("VerletX Engine Editor initialized");
-    info("OpenGL Context created successfully");
+    info("Vulkan Context created successfully");
     debug("Loading scene assets...");
     warning("Texture 'ground_diffuse.png' not found, using fallback");
     info("Physics world initialized with gravity: (0, -9.81, 0)");

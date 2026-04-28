@@ -2,16 +2,28 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <glad/glad.h>
+#include <stdexcept>
+
+#if HAS_SHADERC
+#include <shaderc/shaderc.hpp>
+#endif
+
+unsigned int Shader::s_nextId = 1;
 
 Shader::Shader()
-    : m_programID(0)
+    : m_device(VK_NULL_HANDLE)
+    , m_vertModule(VK_NULL_HANDLE)
+    , m_fragModule(VK_NULL_HANDLE)
+    , m_id(s_nextId++)
 {
 }
 
 Shader::~Shader() {
-    if (m_programID != 0) {
-        glDeleteProgram(m_programID);
+    if (m_device != VK_NULL_HANDLE) {
+        if (m_vertModule != VK_NULL_HANDLE)
+            vkDestroyShaderModule(m_device, m_vertModule, nullptr);
+        if (m_fragModule != VK_NULL_HANDLE)
+            vkDestroyShaderModule(m_device, m_fragModule, nullptr);
     }
 }
 
@@ -25,46 +37,29 @@ std::string Shader::readFile(const std::string& path) {
     return buffer.str();
 }
 
-unsigned int Shader::compileShader(unsigned int type, const std::string& source) {
-    unsigned int shader = glCreateShader(type);
-    const char* src = source.c_str();
-    glShaderSource(shader, 1, &src, nullptr);
-    glCompileShader(shader);
-    
-    int success;
-    char infoLog[512];
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        std::cerr << "Shader compilation error: " << infoLog << std::endl;
-        glDeleteShader(shader);
-        return 0;
-    }
-    
-    return shader;
-}
+std::vector<uint32_t> Shader::compileGLSL(const std::string& source, bool isVertex) {
+#if HAS_SHADERC
+    shaderc::Compiler compiler;
+    shaderc::CompileOptions options;
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
+    options.SetSourceLanguage(shaderc_source_language_glsl);
 
-bool Shader::linkProgram(unsigned int vertex, unsigned int fragment) {
-    m_programID = glCreateProgram();
-    glAttachShader(m_programID, vertex);
-    glAttachShader(m_programID, fragment);
-    glLinkProgram(m_programID);
-    
-    int success;
-    char infoLog[512];
-    glGetProgramiv(m_programID, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(m_programID, 512, nullptr, infoLog);
-        std::cerr << "Program linking error: " << infoLog << std::endl;
-        glDeleteProgram(m_programID);
-        m_programID = 0;
-        return false;
+    auto kind = isVertex ? shaderc_vertex_shader : shaderc_fragment_shader;
+    auto result = compiler.CompileGlslToSpv(source, kind,
+                                            isVertex ? "vert" : "frag", options);
+
+    if (result.GetCompilationStatus() != shaderc_compilation_status_success) {
+        std::cerr << "Shader compilation error: " << result.GetErrorMessage() << std::endl;
+        return {};
     }
-    
-    glDeleteShader(vertex);
-    glDeleteShader(fragment);
-    
-    return true;
+
+    return {result.cbegin(), result.cend()};
+#else
+    // Without shaderc we cannot compile GLSL at runtime.
+    // In a real build the shaders would be pre-compiled to SPIR-V.
+    std::cerr << "shaderc not available -- cannot compile GLSL to SPIR-V at runtime" << std::endl;
+    return {};
+#endif
 }
 
 bool Shader::loadFromFiles(const std::string& vertexPath, const std::string& fragmentPath) {
@@ -74,43 +69,36 @@ bool Shader::loadFromFiles(const std::string& vertexPath, const std::string& fra
 }
 
 bool Shader::loadFromSource(const std::string& vertexSrc, const std::string& fragmentSrc) {
-    unsigned int vertex = compileShader(GL_VERTEX_SHADER, vertexSrc);
-    if (vertex == 0) return false;
-    
-    unsigned int fragment = compileShader(GL_FRAGMENT_SHADER, fragmentSrc);
-    if (fragment == 0) {
-        glDeleteShader(vertex);
+    if (m_device == VK_NULL_HANDLE) {
+        std::cerr << "Shader: VkDevice not set before loadFromSource" << std::endl;
         return false;
     }
-    
-    return linkProgram(vertex, fragment);
-}
 
-void Shader::use() const {
-    glUseProgram(m_programID);
-}
+    auto vertSpirv = compileGLSL(vertexSrc, true);
+    if (vertSpirv.empty()) return false;
 
-void Shader::setBool(const std::string& name, bool value) const {
-    glUniform1i(glGetUniformLocation(m_programID, name.c_str()), (int)value);
-}
+    auto fragSpirv = compileGLSL(fragmentSrc, false);
+    if (fragSpirv.empty()) return false;
 
-void Shader::setInt(const std::string& name, int value) const {
-    glUniform1i(glGetUniformLocation(m_programID, name.c_str()), value);
-}
+    // Create shader modules
+    VkShaderModuleCreateInfo ci{};
+    ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 
-void Shader::setFloat(const std::string& name, float value) const {
-    glUniform1f(glGetUniformLocation(m_programID, name.c_str()), value);
-}
+    ci.codeSize = vertSpirv.size() * sizeof(uint32_t);
+    ci.pCode = vertSpirv.data();
+    if (vkCreateShaderModule(m_device, &ci, nullptr, &m_vertModule) != VK_SUCCESS) {
+        std::cerr << "Failed to create vertex shader module" << std::endl;
+        return false;
+    }
 
-void Shader::setVec3(const std::string& name, const glm::vec3& value) const {
-    glUniform3fv(glGetUniformLocation(m_programID, name.c_str()), 1, &value[0]);
-}
+    ci.codeSize = fragSpirv.size() * sizeof(uint32_t);
+    ci.pCode = fragSpirv.data();
+    if (vkCreateShaderModule(m_device, &ci, nullptr, &m_fragModule) != VK_SUCCESS) {
+        std::cerr << "Failed to create fragment shader module" << std::endl;
+        vkDestroyShaderModule(m_device, m_vertModule, nullptr);
+        m_vertModule = VK_NULL_HANDLE;
+        return false;
+    }
 
-void Shader::setVec4(const std::string& name, const glm::vec4& value) const {
-    glUniform4fv(glGetUniformLocation(m_programID, name.c_str()), 1, &value[0]);
+    return true;
 }
-
-void Shader::setMat4(const std::string& name, const glm::mat4& value) const {
-    glUniformMatrix4fv(glGetUniformLocation(m_programID, name.c_str()), 1, GL_FALSE, &value[0][0]);
-}
-

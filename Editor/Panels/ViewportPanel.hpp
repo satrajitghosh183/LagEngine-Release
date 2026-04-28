@@ -11,6 +11,7 @@
 #include "../../Engine/Graphics/ShadowMap.hpp"
 #include "../Gizmos/TransformGizmo.hpp"
 #include <imgui.h>
+#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <functional>
 
@@ -205,6 +206,13 @@ namespace GameEngine {
 
         // Small framebuffer for the camera-preview picture-in-picture overlay
         Scope<Framebuffer> m_CameraPreviewFramebuffer;
+
+        // ImGui-Vulkan descriptor sets for displaying framebuffer contents.
+        // Created lazily on first display, recreated when the framebuffer
+        // is resized so the descriptor points at the new image view.
+        VkDescriptorSet m_ViewportImGuiDescriptor = VK_NULL_HANDLE;
+        VkDescriptorSet m_PreviewImGuiDescriptor = VK_NULL_HANDLE;
+        VkSampler m_ViewportSampler = VK_NULL_HANDLE;
 
         // Frustum culling
         Frustum m_Frustum;

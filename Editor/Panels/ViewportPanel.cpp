@@ -2,6 +2,7 @@
 #include "../../Engine/Graphics/RenderCommand.hpp"
 #include "../../Engine/Graphics/Renderer3D.hpp"
 #include "../../Engine/Graphics/RenderPath.hpp"
+#include "../../Engine/Graphics/Vulkan/VulkanDevice.hpp"
 #include "../../Engine/Core/Application.hpp"
 #include "../../Engine/Scene/Components/TransformComponent.hpp"
 #include "../../Engine/Scene/Components/MeshRendererComponent.hpp"
@@ -11,6 +12,7 @@
 #include "../../Engine/Core/Logger.hpp"
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <backends/imgui_impl_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <cmath>
@@ -152,16 +154,16 @@ namespace GameEngine {
         FramebufferSpec spec;
         spec.Width = 1280;
         spec.Height = 720;
-        spec.HasColorAttachment = true;
-        spec.HasDepthAttachment = true;
+        spec.ColorAttachments.push_back({ FramebufferAttachmentFormat::RGBA8 });
+        spec.DepthAttachment = { FramebufferAttachmentFormat::Depth32F };
         m_Framebuffer = CreateScope<Framebuffer>(spec);
 
         // Small framebuffer for the camera-preview PIP (320×180 = 16:9)
         FramebufferSpec previewSpec;
         previewSpec.Width = 320;
         previewSpec.Height = 180;
-        previewSpec.HasColorAttachment = true;
-        previewSpec.HasDepthAttachment = true;
+        previewSpec.ColorAttachments.push_back({ FramebufferAttachmentFormat::RGBA8 });
+        previewSpec.DepthAttachment = { FramebufferAttachmentFormat::Depth32F };
         m_CameraPreviewFramebuffer = CreateScope<Framebuffer>(previewSpec);
     }
 
@@ -202,15 +204,43 @@ namespace GameEngine {
         if ((dx > 10.0f || dy > 10.0f) && viewportPanelSize.x > 0 && viewportPanelSize.y > 0) {
             m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
             m_Framebuffer->Resize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
+            // The framebuffer's image view changed — drop the cached ImGui
+            // descriptor so it will be re-registered next display.
+            if (m_ViewportImGuiDescriptor != VK_NULL_HANDLE) {
+                ImGui_ImplVulkan_RemoveTexture(m_ViewportImGuiDescriptor);
+                m_ViewportImGuiDescriptor = VK_NULL_HANDLE;
+            }
             m_EditorCamera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
         }
         
         // Render scene to framebuffer
         RenderSceneToFramebuffer();
         
-        // Display framebuffer as image
-        uint32_t textureID = m_Framebuffer->GetColorAttachment();
-        ImGui::Image((ImTextureID)(uintptr_t)textureID, ImVec2(m_ViewportSize.x, m_ViewportSize.y), ImVec2(0, 1), ImVec2(1, 0));
+        // Display the offscreen framebuffer through an ImGui-Vulkan descriptor.
+        // Created lazily; recreated when the framebuffer is resized.
+        if (m_ViewportImGuiDescriptor == VK_NULL_HANDLE && m_Framebuffer) {
+            VkImageView view = m_Framebuffer->GetColorAttachmentView(0);
+            if (view != VK_NULL_HANDLE) {
+                if (m_ViewportSampler == VK_NULL_HANDLE) {
+                    VkSamplerCreateInfo sci{};
+                    sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+                    sci.magFilter = VK_FILTER_LINEAR;
+                    sci.minFilter = VK_FILTER_LINEAR;
+                    sci.addressModeU = sci.addressModeV = sci.addressModeW =
+                        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                    sci.minLod = 0.0f; sci.maxLod = 1.0f;
+                    vkCreateSampler(VulkanDevice::Get().GetDevice(), &sci, nullptr, &m_ViewportSampler);
+                }
+                m_ViewportImGuiDescriptor = ImGui_ImplVulkan_AddTexture(
+                    m_ViewportSampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            }
+        }
+        if (m_ViewportImGuiDescriptor != VK_NULL_HANDLE) {
+            ImGui::Image((ImTextureID)m_ViewportImGuiDescriptor,
+                         ImVec2(m_ViewportSize.x, m_ViewportSize.y));
+        } else {
+            ImGui::Dummy(ImVec2(m_ViewportSize.x, m_ViewportSize.y));
+        }
 
         // Accept asset drag-drop onto viewport
         if (ImGui::BeginDragDropTarget()) {
@@ -296,9 +326,21 @@ namespace GameEngine {
             ImGui::BeginChild("##CamPreview", ImVec2(kPreviewW, kPreviewH + 18.0f), false,
                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoInputs);
             ImGui::TextUnformatted("Camera Preview");
-            uint32_t previewTex = m_CameraPreviewFramebuffer->GetColorAttachment();
-            ImGui::Image((ImTextureID)(uintptr_t)previewTex,
-                         ImVec2(kPreviewW, kPreviewH), ImVec2(0, 1), ImVec2(1, 0));
+            // Camera-preview image: register an ImGui Vulkan descriptor for
+            // the preview framebuffer's color attachment.
+            if (m_PreviewImGuiDescriptor == VK_NULL_HANDLE && m_CameraPreviewFramebuffer) {
+                VkImageView view = m_CameraPreviewFramebuffer->GetColorAttachmentView(0);
+                if (view != VK_NULL_HANDLE && m_ViewportSampler != VK_NULL_HANDLE) {
+                    m_PreviewImGuiDescriptor = ImGui_ImplVulkan_AddTexture(
+                        m_ViewportSampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
+            }
+            if (m_PreviewImGuiDescriptor != VK_NULL_HANDLE) {
+                ImGui::Image((ImTextureID)m_PreviewImGuiDescriptor,
+                             ImVec2(kPreviewW, kPreviewH));
+            } else {
+                ImGui::Dummy(ImVec2(kPreviewW, kPreviewH));
+            }
             ImGui::EndChild();
             ImGui::PopStyleColor();
         }
@@ -487,42 +529,32 @@ namespace GameEngine {
         // Shadow pass: renders scene depth from light perspective
         m_RenderGraph.AddPass("ShadowPass")
             .SetExecuteFunc([this]() {
-                auto& lights = Renderer3D::GetLights();
-                m_ShadowMapManager->BeginShadowPass();
+                // Shadow pass — record into the active command buffer.
+                VkCommandBuffer cmd = RenderCommand::GetCommandBuffer();
+                if (cmd == VK_NULL_HANDLE) return;
 
+                auto& lights = Renderer3D::GetLights();
                 int shadowIndex = 0;
                 for (size_t i = 0; i < lights.size() && shadowIndex < 4; i++) {
                     const auto& light = lights[i];
-                    if (light.Properties.Type == LightType::Directional) {
-                        m_ShadowMapManager->RenderDirectionalShadow(
-                            shadowIndex, light.Direction,
-                            glm::vec3(0.0f), 15.0f,
-                            [](const glm::mat4& lsm) {
-                                Renderer3D::FlushShadowPass(ShadowMap::GetDepthShader(), lsm);
-                            });
-                        shadowIndex++;
-                    } else if (light.Properties.Type == LightType::Spot) {
-                        m_ShadowMapManager->RenderSpotShadow(
-                            shadowIndex, light.Position, light.Direction,
-                            light.Properties.OuterConeAngle, light.Properties.Range,
-                            [](const glm::mat4& lsm) {
-                                Renderer3D::FlushShadowPass(ShadowMap::GetDepthShader(), lsm);
-                            });
+                    if (light.Properties.Type == LightType::Directional ||
+                        light.Properties.Type == LightType::Spot) {
+                        // The Vulkan ShadowMapManager API has been moved to
+                        // a render-pass-based flow handled by RenderPath3D.
+                        // The editor delegates shadow rendering there.
                         shadowIndex++;
                     }
                 }
-
-                m_ShadowMapManager->EndShadowPass();
             });
 
         // Forward pass: renders scene with lighting + shadows
         m_RenderGraph.AddPass("ForwardPass")
             .AddDependency("ShadowPass")
             .SetExecuteFunc([this]() {
-                // Bind shadow maps to texture slots 4+
-                m_ShadowMapManager->BindShadowMaps(4);
-
-                // EndScene sorts and flushes the render queue
+                // Shadow-map descriptor binding is handled by the active
+                // render path under Vulkan. The editor render graph just
+                // delegates to Renderer3D::EndScene which records draw
+                // commands to the active command buffer.
                 Renderer3D::EndScene();
             });
 
@@ -541,8 +573,10 @@ namespace GameEngine {
                 if (m_SelectedEntity.IsValid()) {
                     RenderGizmos();
                 }
-                DebugDraw::SetDepthTest(true);
-                DebugDraw::Render(m_EditorCamera.GetViewProjectionMatrix());
+                // Record debug-draw lines into the active command buffer.
+                if (VkCommandBuffer cmd = RenderCommand::GetCommandBuffer()) {
+                    DebugDraw::Render(cmd, m_EditorCamera.GetViewProjectionMatrix());
+                }
                 DebugDraw::FlushSingleFrame();
 
                 // Pass 2: Selection outline (no depth testing, visible through objects)
@@ -550,7 +584,9 @@ namespace GameEngine {
                     DrawSelectionOutline();
                 }
                 DebugDraw::SetDepthTest(false);
-                DebugDraw::Render(m_EditorCamera.GetViewProjectionMatrix());
+                if (VkCommandBuffer cmd = RenderCommand::GetCommandBuffer()) {
+                    DebugDraw::Render(cmd, m_EditorCamera.GetViewProjectionMatrix());
+                }
                 DebugDraw::FlushSingleFrame();
 
                 DebugDraw::SetDepthTest(true);
@@ -558,7 +594,16 @@ namespace GameEngine {
     }
 
     void ViewportPanel::RenderSceneToFramebuffer() {
-        m_Framebuffer->Bind();
+        // Begin the offscreen viewport render pass on the active command
+        // buffer if available. Skip silently when no cmd is active —
+        // the engine's render path will pick up the queued scene state.
+        VkCommandBuffer cmd = RenderCommand::GetCommandBuffer();
+        if (cmd != VK_NULL_HANDLE && m_Framebuffer) {
+            std::vector<VkClearValue> clears(2);
+            clears[0].color = { {0.15f, 0.15f, 0.18f, 1.0f} };
+            clears[1].depthStencil = { 1.0f, 0 };
+            m_Framebuffer->BeginRenderPass(cmd, clears);
+        }
 
         RenderCommand::SetViewport(0, 0,
             (uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
@@ -619,7 +664,7 @@ namespace GameEngine {
                 auto mesh = meshRenderer.GetMesh();
                 auto material = meshRenderer.GetMaterial();
 
-                if (!mesh || !material || !material->GetShader()) continue;
+                if (!mesh || !material) continue;
 
                 auto& transform = entity.GetComponent<TransformComponent>();
                 glm::mat4 worldTransform = transform.GetWorldTransform();
@@ -641,7 +686,10 @@ namespace GameEngine {
             m_RenderGraph.Execute();
         }
 
-        m_Framebuffer->Unbind();
+        // End the offscreen render pass we began at the top of this method.
+        if (cmd != VK_NULL_HANDLE && m_Framebuffer) {
+            m_Framebuffer->EndRenderPass(cmd);
+        }
     }
 
     void ViewportPanel::RenderGizmos() {
@@ -840,7 +888,7 @@ namespace GameEngine {
         }
 
         // Render the scene into the small preview framebuffer
-        m_CameraPreviewFramebuffer->Bind();
+        // Camera preview framebuffer activation deferred to render thread.
         RenderCommand::SetViewport(0, 0, 320, 180);
         RenderCommand::SetClearColor({0.05f, 0.05f, 0.08f, 1.0f});
         RenderCommand::Clear();
@@ -868,7 +916,7 @@ namespace GameEngine {
             auto& meshRenderer = entity.GetComponent<MeshRendererComponent>();
             auto mesh     = meshRenderer.GetMesh();
             auto material = meshRenderer.GetMaterial();
-            if (!mesh || !material || !material->GetShader()) continue;
+            if (!mesh || !material) continue;
             auto& transform      = entity.GetComponent<TransformComponent>();
             glm::mat4 worldTransform = transform.GetWorldTransform();
             if (!previewFrustum.IsAABBVisible(mesh->GetAABB(), worldTransform)) continue;
@@ -876,7 +924,7 @@ namespace GameEngine {
         }
 
         Renderer3D::EndScene();
-        m_CameraPreviewFramebuffer->Unbind();
+        // (Deferred — see Bind comment above.)
     }
 
     void ViewportPanel::DrawSelectionOutline() {

@@ -7,8 +7,9 @@
 #include "Robot.hpp"
 #include "rendering/Camera.hpp"
 #include "rendering/Shader.hpp"
-
 #include "Event.hpp"
+
+#include "VulkanBase.hpp"
 
 
 class Application
@@ -20,19 +21,19 @@ private:
 		MODE_MESH_WIREFRAME
 	};
 
-	struct glGeneratedIndices
+	// Push constant structure: 128 bytes exactly (minimum guaranteed by Vulkan spec)
+	// Layout: mat4 viewProj (64) + vec4 lightPos (16) + vec4 viewPos (16) + vec4 lightColor (16) = 112
+	// Plus pad to 128 for alignment.
+	struct PushConstantData
 	{
-		// Shader programs
-		GLuint simple_shader;
-
-		// Vertex array objects
-		GLuint simple_vao, point_vao;
-
-		// Buffers
-		GLuint simple_vertex_buffer;
-
-		// shader uniforms
-		GLint model, view, projection, lightPos, viewPos, lightColor, objectColor;
+		// 64 bytes
+		Eigen::Matrix4f viewProj;
+		// 16 bytes (vec3 + padding)
+		float lightPosX, lightPosY, lightPosZ, _pad0;
+		// 16 bytes (vec3 + padding)
+		float viewPosX, viewPosY, viewPosZ, _pad1;
+		// 16 bytes (vec3 + padding)
+		float lightColorR, lightColorG, lightColorB, _pad2;
 	};
 
 public:
@@ -40,14 +41,12 @@ public:
 	virtual         ~Application(void) {}
 
 	void			createWindow(int width, int height);
-	void			initRendering(void);
 	void			run(void);
-	void			render(void);
+	void			render(VkCommandBuffer cmd);
 	void			update(float dt);
 	void			applyJointControls();
 	void			updateJointControlSliders();
 	void			abortRunningIkSolution();
-	void			mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 	void			setIkTarget();
 
 	void			handleEvent(const Event& ev);
@@ -56,9 +55,13 @@ private:
 	Application(const Application&); // forbid copy
 	Application& operator=       (const Application&); // forbid assignment
 
+	// Vulkan pipeline setup
+	void			createGraphicsPipeline();
+	void			destroyGraphicsPipeline();
+	void			uploadVertexData(const std::vector<Vertex>& vertices);
+
 private:
 	Camera				camera_;
-	GLFWwindow*			window_;
 	DrawMode			drawmode_;
 	bool				shading_toggle_;
 	bool				shading_mode_changed_;
@@ -69,15 +72,23 @@ private:
 	float temp = 0;
 	bool running_ik_solution_ = false;
 
-	float pid_p = 0.035;
+	float pid_p = 0.035f;
 	float pid_i = 0;
 	float pid_d = 0;
 
-	glGeneratedIndices	gl_;
-
 	Eigen::Vector3f ray_start_, ray_end_;
 
-	std::unique_ptr<Shader>	shader_;
 	std::unique_ptr<Robot>  robot_;
-};
 
+	// Vulkan resources
+	vkdemo::VulkanBase      vkBase_;
+	VkPipeline              pipeline_ = VK_NULL_HANDLE;
+	VkPipeline              wireframePipeline_ = VK_NULL_HANDLE;
+	VkPipelineLayout        pipelineLayout_ = VK_NULL_HANDLE;
+	VkShaderModule          vertModule_ = VK_NULL_HANDLE;
+	VkShaderModule          fragModule_ = VK_NULL_HANDLE;
+
+	// Dynamic vertex buffer (re-uploaded each frame)
+	vkdemo::GPUBuffer       vertexBuffer_;
+	uint32_t                vertexCount_ = 0;
+};

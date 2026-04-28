@@ -1,136 +1,32 @@
 #include "Material.hpp"
-#include <glad/glad.h>
+#include "../Core/Logger.hpp"
 
 namespace GameEngine {
 
-    Material::Material() {
-        // Default constructor - shader needs to be set later
-    }
+    Material::Material() {}
 
-    Material::Material(const Ref<Shader>& shader)
-        : m_Shader(shader) {
-    }
+    // -------------------------------------------------------------------------
+    // Custom textures
+    // -------------------------------------------------------------------------
 
-    void Material::Bind() const {
-        if (!m_Shader) return;
-        m_Shader->Bind();
-
-        // Push PBR material properties as uniforms
-        m_Shader->SetUniformVec3("u_Material.albedo", m_Albedo);
-        m_Shader->SetUniformFloat("u_Material.metallic", m_Metallic);
-        m_Shader->SetUniformFloat("u_Material.roughness", m_Roughness);
-        m_Shader->SetUniformFloat("u_Material.ao", m_AO);
-
-        // Legacy uniform for simpler shaders
-        m_Shader->SetUniformVec3("u_Color", m_Albedo);
-
-        // Fixed slot layout: PBR maps 0-4, custom textures 5+
-        constexpr uint32_t kPBRSlotAlbedo = 0;
-        constexpr uint32_t kPBRSlotNormal = 1;
-        constexpr uint32_t kPBRSlotMetallic = 2;
-        constexpr uint32_t kPBRSlotRoughness = 3;
-        constexpr uint32_t kPBRSlotAO = 4;
-        constexpr uint32_t kCustomTextureBaseSlot = 5;
-
-        int hasAlbedoMap = 0, hasNormalMap = 0, hasMetallicMap = 0, hasRoughnessMap = 0, hasAOMap = 0;
-        if (m_AlbedoMap) {
-            m_AlbedoMap->Bind(kPBRSlotAlbedo);
-            m_Shader->SetUniformInt("u_AlbedoMap", kPBRSlotAlbedo);
-            hasAlbedoMap = 1;
+    void Material::SetTexture(const std::string& name, const Ref<Texture2D>& texture) {
+        // Replace if already present, otherwise append
+        for (auto& [n, t] : m_CustomTextures) {
+            if (n == name) { t = texture; return; }
         }
-        if (m_NormalMap) {
-            m_NormalMap->Bind(kPBRSlotNormal);
-            m_Shader->SetUniformInt("u_NormalMap", kPBRSlotNormal);
-            hasNormalMap = 1;
-        }
-        if (m_MetallicMap) {
-            m_MetallicMap->Bind(kPBRSlotMetallic);
-            m_Shader->SetUniformInt("u_MetallicMap", kPBRSlotMetallic);
-            hasMetallicMap = 1;
-        }
-        if (m_RoughnessMap) {
-            m_RoughnessMap->Bind(kPBRSlotRoughness);
-            m_Shader->SetUniformInt("u_RoughnessMap", kPBRSlotRoughness);
-            hasRoughnessMap = 1;
-        }
-        if (m_AOMap) {
-            m_AOMap->Bind(kPBRSlotAO);
-            m_Shader->SetUniformInt("u_AOMap", kPBRSlotAO);
-            hasAOMap = 1;
-        }
-
-        m_Shader->SetUniformInt("u_HasAlbedoMap", hasAlbedoMap);
-        m_Shader->SetUniformInt("u_HasNormalMap", hasNormalMap);
-        m_Shader->SetUniformInt("u_HasMetallicMap", hasMetallicMap);
-        m_Shader->SetUniformInt("u_HasRoughnessMap", hasRoughnessMap);
-        m_Shader->SetUniformInt("u_HasAOMap", hasAOMap);
-
-        uint32_t customSlot = kCustomTextureBaseSlot;
-        for (const auto& [name, slot] : m_Textures) {
-            slot.Texture->Bind(customSlot);
-            m_Shader->SetUniformInt(name, static_cast<int>(customSlot));
-            customSlot++;
-        }
-
-        // Set custom uniforms
-        for (const auto& [name, value] : m_IntParams)
-            m_Shader->SetUniformInt(name, value);
-        for (const auto& [name, value] : m_FloatParams)
-            m_Shader->SetUniformFloat(name, value);
-        for (const auto& [name, value] : m_Vec2Params)
-            m_Shader->SetUniformVec2(name, value);
-        for (const auto& [name, value] : m_Vec3Params)
-            m_Shader->SetUniformVec3(name, value);
-        for (const auto& [name, value] : m_Vec4Params)
-            m_Shader->SetUniformVec4(name, value);
-        for (const auto& [name, value] : m_Mat4Params)
-            m_Shader->SetUniformMat4(name, value);
+        m_CustomTextures.emplace_back(name, texture);
     }
 
-    void Material::Unbind() const {
-        if (!m_Shader) return;
-        m_Shader->Unbind();
-        // Unbind PBR texture slots (0-4)
-        for (uint32_t slot = 0; slot <= 4; slot++) {
-            glActiveTexture(GL_TEXTURE0 + slot);
-            glBindTexture(GL_TEXTURE_2D, 0);
-        }
-        // Unbind custom texture slots (5+)
-        uint32_t customSlot = 5;
-        for (const auto& [name, slot] : m_Textures) {
-            glActiveTexture(GL_TEXTURE0 + customSlot);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            customSlot++;
-        }
-    }
+    // -------------------------------------------------------------------------
+    // Generic parameter setters
+    // -------------------------------------------------------------------------
 
-    void Material::SetTexture(const std::string& name, const Ref<Texture2D>& texture, uint32_t slot) {
-        m_Textures[name] = { texture, slot };
-    }
-
-    void Material::SetInt(const std::string& name, int value) {
-        m_IntParams[name] = value;
-    }
-
-    void Material::SetFloat(const std::string& name, float value) {
-        m_FloatParams[name] = value;
-    }
-
-    void Material::SetVec2(const std::string& name, const glm::vec2& value) {
-        m_Vec2Params[name] = value;
-    }
-
-    void Material::SetVec3(const std::string& name, const glm::vec3& value) {
-        m_Vec3Params[name] = value;
-    }
-
-    void Material::SetVec4(const std::string& name, const glm::vec4& value) {
-        m_Vec4Params[name] = value;
-    }
-
-    void Material::SetMat4(const std::string& name, const glm::mat4& value) {
-        m_Mat4Params[name] = value;
-    }
+    void Material::SetInt(const std::string& name, int value)              { m_IntParams[name]   = value; }
+    void Material::SetFloat(const std::string& name, float value)          { m_FloatParams[name] = value; }
+    void Material::SetVec2(const std::string& name, const glm::vec2& value){ m_Vec2Params[name]  = value; }
+    void Material::SetVec3(const std::string& name, const glm::vec3& value){ m_Vec3Params[name]  = value; }
+    void Material::SetVec4(const std::string& name, const glm::vec4& value){ m_Vec4Params[name]  = value; }
+    void Material::SetMat4(const std::string& name, const glm::mat4& value){ m_Mat4Params[name]  = value; }
 
     int Material::GetInt(const std::string& name) const {
         auto it = m_IntParams.find(name);
@@ -151,4 +47,67 @@ namespace GameEngine {
         auto it = m_Vec4Params.find(name);
         return (it != m_Vec4Params.end()) ? it->second : glm::vec4(0.0f);
     }
-}
+
+    // -------------------------------------------------------------------------
+    // UBO payload
+    // -------------------------------------------------------------------------
+
+    Material::MaterialUBO Material::GetMaterialBufferData() const {
+        MaterialUBO ubo{};
+        ubo.Albedo          = glm::vec4(m_Albedo, 1.0f);
+        ubo.Metallic        = m_Metallic;
+        ubo.Roughness       = m_Roughness;
+        ubo.AO              = m_AO;
+        ubo.HasAlbedoMap    = m_AlbedoMap    ? 1 : 0;
+        ubo.HasNormalMap    = m_NormalMap    ? 1 : 0;
+        ubo.HasMetallicMap  = m_MetallicMap  ? 1 : 0;
+        ubo.HasRoughnessMap = m_RoughnessMap ? 1 : 0;
+        ubo.HasAOMap        = m_AOMap        ? 1 : 0;
+        return ubo;
+    }
+
+    // -------------------------------------------------------------------------
+    // Descriptor writes
+    // -------------------------------------------------------------------------
+
+    void Material::WriteDescriptors(VulkanDescriptorWriter& writer,
+                                     VkSampler fallbackSampler,
+                                     VkImageView fallbackView) const {
+        // Helper: build a VkDescriptorImageInfo for a texture map (or fallback).
+        auto makeImageInfo = [&](const Ref<Texture2D>& tex) -> VkDescriptorImageInfo {
+            VkDescriptorImageInfo info{};
+            info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            if (tex) {
+                info.imageView = tex->GetImageView();
+                info.sampler   = tex->GetSampler();
+            } else {
+                info.imageView = fallbackView;
+                info.sampler   = fallbackSampler;
+            }
+            return info;
+        };
+
+        VkDescriptorImageInfo albedoInfo    = makeImageInfo(m_AlbedoMap);
+        VkDescriptorImageInfo normalInfo    = makeImageInfo(m_NormalMap);
+        VkDescriptorImageInfo metallicInfo  = makeImageInfo(m_MetallicMap);
+        VkDescriptorImageInfo roughnessInfo = makeImageInfo(m_RoughnessMap);
+        VkDescriptorImageInfo aoInfo        = makeImageInfo(m_AOMap);
+
+        writer
+            .WriteImage(kSlotAlbedo,   &albedoInfo)
+            .WriteImage(kSlotNormal,   &normalInfo)
+            .WriteImage(kSlotMetallic, &metallicInfo)
+            .WriteImage(kSlotRoughness,&roughnessInfo)
+            .WriteImage(kSlotAO,       &aoInfo);
+
+        // Custom textures start at kSlotCustomBase
+        uint32_t slot = kSlotCustomBase;
+        for (const auto& [name, tex] : m_CustomTextures) {
+            if (!tex) { slot++; continue; }
+            VkDescriptorImageInfo info = makeImageInfo(tex);
+            writer.WriteImage(slot, &info);
+            slot++;
+        }
+    }
+
+} // namespace GameEngine

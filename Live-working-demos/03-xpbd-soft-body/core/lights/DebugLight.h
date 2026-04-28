@@ -12,12 +12,12 @@
 
 class DebugLight {
 public:
-    static Mesh *CreateDebugPointLightMesh(PointLight *light, Scene &scene) {
+    static std::shared_ptr<Mesh> CreateDebugPointLightMesh(PointLight *light, Scene &scene) {
         auto mesh = MeshBuilder::makeCube("debug_light_sphere", scene);
         mesh->transform()->setScale(0.3f);
         mesh->transform()->setParent(light->transform());
 
-        auto material = new BlinnPhongMaterial();
+        auto material = std::make_shared<BlinnPhongMaterial>();
         material->setLightingEnabled(false);
         material->setAmbientColor(light->color());
         light->onColorChanged.add([material](float r, float g, float b) {

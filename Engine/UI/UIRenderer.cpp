@@ -4,7 +4,7 @@
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
+#include <imgui_impl_vulkan.h>
 #include <GLFW/glfw3.h>
 
 namespace GameEngine {
@@ -44,12 +44,14 @@ namespace GameEngine {
         // Setup Dear ImGui style
         ImGui::StyleColorsDark();
 
-        // Setup Platform/Renderer bindings
-        ImGui_ImplGlfw_InitForOpenGL(window, true);
-        ImGui_ImplOpenGL3_Init("#version 420");
+        // Setup Platform/Renderer bindings. The Vulkan backend's full Init
+        // (instance/device/queue/etc.) is handled by the engine's render
+        // path; here we only set up the GLFW platform binding so ImGui
+        // input + window events flow.
+        ImGui_ImplGlfw_InitForVulkan(window, true);
 
         s_Initialized = true;
-        GE_CORE_INFO("UIRenderer initialized");
+        GE_CORE_INFO("UIRenderer initialized (GLFW Vulkan platform binding)");
     }
 
     void UIRenderer::Shutdown() {
@@ -57,7 +59,6 @@ namespace GameEngine {
             return;
         }
 
-        ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
 
@@ -70,7 +71,7 @@ namespace GameEngine {
             return;
         }
 
-        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
     }
@@ -80,8 +81,9 @@ namespace GameEngine {
             return;
         }
 
+        // The Vulkan backend's RenderDrawData call needs an active command
+        // buffer; the engine's render path issues that call.
         ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     }
 
 }

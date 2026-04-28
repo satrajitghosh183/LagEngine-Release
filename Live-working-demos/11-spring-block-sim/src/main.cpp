@@ -1,5 +1,5 @@
-//  SpringBlockSim – main.cpp
-//  Hyperrealistic spring-block simulator with PBR + bloom + shadow mapping
+//  SpringBlockSim – main.cpp (Vulkan)
+//  Hyperrealistic spring-block simulator with PBR rendering
 //  ─────────────────────────────────────────────────────────────────────────
 //  Controls:
 //    Right-click drag   – orbit camera
@@ -9,12 +9,9 @@
 //    Left drag on block – move block (horizontal plane)
 // ─────────────────────────────────────────────────────────────────────────────
 
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
+#include <VulkanBase.hpp>
 
 #include <imgui.h>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_opengl3.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -52,7 +49,7 @@ static bool g_draggingBlock = false;
 static float g_dragPlaneY  = 0.0f;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ray → AABB intersection (slab method)
+// Ray -> AABB intersection (slab method)
 // Returns t (distance along ray) or -1 if no hit
 // ─────────────────────────────────────────────────────────────────────────────
 static float rayAABB(const glm::vec3& ro, const glm::vec3& rd,
@@ -178,10 +175,10 @@ static void buildDefaultScene() {
         g_world.addBlock(b);
     }
 
-    // Spring 0: Anchor (block 0) → Mass A (block 1)
+    // Spring 0: Anchor (block 0) -> Mass A (block 1)
     {
         Spring s;
-        s.name       = "Spring (Anchor→A)";
+        s.name       = "Spring (Anchor->A)";
         s.blockA     = 0;
         s.blockB     = 1;
         s.k          = 120.0f;
@@ -190,10 +187,10 @@ static void buildDefaultScene() {
         g_world.addSpring(s);
     }
 
-    // Spring 1: Mass A → Mass B
+    // Spring 1: Mass A -> Mass B
     {
         Spring s;
-        s.name       = "Spring (A→B)";
+        s.name       = "Spring (A->B)";
         s.blockA     = 1;
         s.blockB     = 2;
         s.k          = 80.0f;
@@ -202,10 +199,10 @@ static void buildDefaultScene() {
         g_world.addSpring(s);
     }
 
-    // Spring 2: World anchor above floor block → floor block
+    // Spring 2: World anchor above floor block -> floor block
     {
         Spring s;
-        s.name       = "Spring (World→Floor)";
+        s.name       = "Spring (World->Floor)";
         s.blockA     = -1;          // fixed anchor
         s.anchorA    = {3.0f, 5.0f, 0};
         s.blockB     = 3;
@@ -213,77 +210,6 @@ static void buildDefaultScene() {
         s.damping    = 2.5f;
         s.restLength = 3.5f;
         g_world.addSpring(s);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GLFW callbacks
-// ─────────────────────────────────────────────────────────────────────────────
-static void framebufferCB(GLFWwindow*, int w, int h) {
-    g_width = w; g_height = h;
-    glViewport(0, 0, w, h);
-    g_renderer.resize(w, h);
-}
-
-static void scrollCB(GLFWwindow*, double /*dx*/, double dy) {
-    if (ImGui::GetIO().WantCaptureMouse) return;
-    g_cam.zoom((float)dy);
-}
-
-static void mouseButtonCB(GLFWwindow* win, int button, int action, int /*mods*/) {
-    if (ImGui::GetIO().WantCaptureMouse) return;
-
-    double cx, cy;
-    glfwGetCursorPos(win, &cx, &cy);
-    g_prevX = cx; g_prevY = cy;
-
-    if (button == GLFW_MOUSE_BUTTON_RIGHT)
-        g_rightDown = (action == GLFW_PRESS);
-    if (button == GLFW_MOUSE_BUTTON_MIDDLE)
-        g_midDown = (action == GLFW_PRESS);
-
-    if (button == GLFW_MOUSE_BUTTON_LEFT) {
-        g_leftDown = (action == GLFW_PRESS);
-        if (action == GLFW_PRESS) {
-            // Try to pick a block
-            int picked = pickBlock(cx, cy);
-            if (picked >= 0) {
-                g_selBlock  = picked;
-                g_selSpring = -1;
-                g_draggingBlock = true;
-                g_dragPlaneY = g_world.blocks[picked].position.y;
-            } else {
-                // Deselect
-                g_selBlock  = -1;
-                g_selSpring = -1;
-                g_draggingBlock = false;
-            }
-        } else {
-            g_draggingBlock = false;
-        }
-    }
-}
-
-static void cursorPosCB(GLFWwindow*, double cx, double cy) {
-    if (ImGui::GetIO().WantCaptureMouse) {
-        g_prevX = cx; g_prevY = cy;
-        return;
-    }
-    double dx = cx - g_prevX;
-    double dy = cy - g_prevY;
-    g_prevX = cx; g_prevY = cy;
-
-    if (g_rightDown) g_cam.orbit((float)dx, (float)dy);
-    if (g_midDown)   g_cam.pan  ((float)dx, (float)dy);
-
-    if (g_draggingBlock && g_selBlock >= 0 && g_selBlock < (int)g_world.blocks.size()) {
-        Block& b = g_world.blocks[g_selBlock];
-        if (!b.isAnchored) {
-            glm::vec3 hit = rayPlaneHit(cx, cy, g_dragPlaneY);
-            b.position.x  = hit.x;
-            b.position.z  = hit.z;
-            b.velocity    = {0, 0, 0};  // zero out velocity on drag
-        }
     }
 }
 
@@ -336,39 +262,26 @@ static void processUIActions(const UIActions& act) {
 // main
 // ─────────────────────────────────────────────────────────────────────────────
 int main() {
-    if (!glfwInit()) { std::cerr << "GLFW init failed\n"; return 1; }
+    vkdemo::VulkanBase vkBase;
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_SAMPLES, 4);   // MSAA
+    vkdemo::AppConfig config;
+    config.Title           = "Spring & Block Simulator (Vulkan)";
+    config.Width           = g_width;
+    config.Height          = g_height;
+    config.EnableValidation = true;
+    config.EnableImGui     = true;
 
-    GLFWwindow* window = glfwCreateWindow(g_width, g_height,
-                                          "Spring & Block Simulator", nullptr, nullptr);
-    if (!window) { std::cerr << "Window creation failed\n"; glfwTerminate(); return 1; }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
-
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cerr << "GLAD init failed\n"; return 1;
+    try {
+        vkBase.Init(config);
+    } catch (const std::exception& e) {
+        std::cerr << "VulkanBase init failed: " << e.what() << "\n";
+        return 1;
     }
 
-    std::cout << "OpenGL " << glGetString(GL_VERSION) << "\n";
+    g_width  = vkBase.GetWidth();
+    g_height = vkBase.GetHeight();
 
-    // Callbacks
-    glfwSetFramebufferSizeCallback(window, framebufferCB);
-    glfwSetScrollCallback         (window, scrollCB);
-    glfwSetMouseButtonCallback    (window, mouseButtonCB);
-    glfwSetCursorPosCallback      (window, cursorPosCB);
-
-    // ImGui
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-    // Dark theme with custom palette
-    ImGui::StyleColorsDark();
+    // ImGui style customization
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding  = 6.0f;
     style.FrameRounding   = 4.0f;
@@ -380,11 +293,75 @@ int main() {
     style.Colors[ImGuiCol_ButtonHovered]  = {0.30f, 0.55f, 0.80f, 1.00f};
     style.Colors[ImGuiCol_FrameBg]        = {0.16f, 0.17f, 0.22f, 1.00f};
 
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330 core");
+    // Callbacks (VulkanBase dispatches these via std::function)
+    vkBase.OnScroll = [](GLFWwindow*, double /*dx*/, double dy) {
+        if (ImGui::GetIO().WantCaptureMouse) return;
+        g_cam.zoom((float)dy);
+    };
+
+    vkBase.OnMouseButton = [](GLFWwindow* win, int button, int action, int /*mods*/) {
+        if (ImGui::GetIO().WantCaptureMouse) return;
+
+        double cx, cy;
+        glfwGetCursorPos(win, &cx, &cy);
+        g_prevX = cx; g_prevY = cy;
+
+        if (button == GLFW_MOUSE_BUTTON_RIGHT)
+            g_rightDown = (action == GLFW_PRESS);
+        if (button == GLFW_MOUSE_BUTTON_MIDDLE)
+            g_midDown = (action == GLFW_PRESS);
+
+        if (button == GLFW_MOUSE_BUTTON_LEFT) {
+            g_leftDown = (action == GLFW_PRESS);
+            if (action == GLFW_PRESS) {
+                int picked = pickBlock(cx, cy);
+                if (picked >= 0) {
+                    g_selBlock  = picked;
+                    g_selSpring = -1;
+                    g_draggingBlock = true;
+                    g_dragPlaneY = g_world.blocks[picked].position.y;
+                } else {
+                    g_selBlock  = -1;
+                    g_selSpring = -1;
+                    g_draggingBlock = false;
+                }
+            } else {
+                g_draggingBlock = false;
+            }
+        }
+    };
+
+    vkBase.OnMouseMove = [](GLFWwindow*, double cx, double cy) {
+        if (ImGui::GetIO().WantCaptureMouse) {
+            g_prevX = cx; g_prevY = cy;
+            return;
+        }
+        double dx = cx - g_prevX;
+        double dy = cy - g_prevY;
+        g_prevX = cx; g_prevY = cy;
+
+        if (g_rightDown) g_cam.orbit((float)dx, (float)dy);
+        if (g_midDown)   g_cam.pan  ((float)dx, (float)dy);
+
+        if (g_draggingBlock && g_selBlock >= 0 && g_selBlock < (int)g_world.blocks.size()) {
+            Block& b = g_world.blocks[g_selBlock];
+            if (!b.isAnchored) {
+                glm::vec3 hit = rayPlaneHit(cx, cy, g_dragPlaneY);
+                b.position.x  = hit.x;
+                b.position.z  = hit.z;
+                b.velocity    = {0, 0, 0};
+            }
+        }
+    };
+
+    vkBase.OnResize = [](int w, int h) {
+        g_width  = w;
+        g_height = h;
+        g_renderer.resize(w, h);
+    };
 
     // Renderer + scene
-    g_renderer.init(g_width, g_height);
+    g_renderer.init(&vkBase);
     buildDefaultScene();
 
     // Camera start position
@@ -395,21 +372,20 @@ int main() {
 
     double prevTime = glfwGetTime();
 
-    // ── Main loop ─────────────────────────────────────────────────────────────
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
+    // Main loop
+    while (true) {
+        if (!vkBase.BeginFrame())
+            break;
 
         double now = glfwGetTime();
-        float  dt  = std::min((float)(now - prevTime), 0.05f); // cap to avoid spiral
+        float  dt  = std::min((float)(now - prevTime), 0.05f);
         prevTime   = now;
 
         // Physics
         g_world.step(dt);
 
         // ImGui frame
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
+        vkBase.ImGuiNewFrame();
 
         // Clamp selection indices
         if (g_selBlock  >= (int)g_world.blocks.size())  g_selBlock  = -1;
@@ -418,22 +394,23 @@ int main() {
         g_ui.draw(g_world, g_renderer.cfg, g_selBlock, g_selSpring);
         processUIActions(g_ui.actions);
 
-        // Render
-        g_renderer.render(g_world, g_cam, g_selBlock, g_selSpring);
+        // Record draw commands into the current command buffer
+        VkCommandBuffer cmd = vkBase.GetCurrentCommandBuffer();
 
-        // ImGui render (on top)
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        // Update width/height in case of resize
+        g_width  = vkBase.GetWidth();
+        g_height = vkBase.GetHeight();
 
-        glfwSwapBuffers(window);
+        g_renderer.render(cmd, g_world, g_cam, g_selBlock, g_selSpring);
+
+        // ImGui render (on top, into the same render pass)
+        vkBase.ImGuiRender(cmd);
+
+        vkBase.EndFrame();
     }
 
     // Cleanup
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
     g_renderer.shutdown();
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    vkBase.Shutdown();
     return 0;
 }

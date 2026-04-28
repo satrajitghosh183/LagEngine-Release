@@ -1,10 +1,8 @@
 #pragma once
 
-#ifndef GLFW_INCLUDE_NONE
-#define GLFW_INCLUDE_NONE
-#endif
-
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <vulkan/vulkan.h>
 #include <memory>
 #include <vector>
 
@@ -14,13 +12,8 @@ public:
     ~Window();
 
     bool shouldClose() const;
-    void swapBuffers();
     void pollEvents();
-    void makeContextCurrent();
-    
-    // Create a shared OpenGL context for worker threads
-    GLFWwindow* createSharedContext();
-    
+
     GLFWwindow* getHandle() { return m_window; }
     int getWidth() const { return m_width; }
     int getHeight() const { return m_height; }
@@ -29,11 +22,9 @@ public:
 
 private:
     GLFWwindow* m_window;
-    std::vector<GLFWwindow*> m_sharedContexts;  // Track shared contexts for cleanup
     int m_width;
     int m_height;
     bool m_resized;
-    
+
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 };
-

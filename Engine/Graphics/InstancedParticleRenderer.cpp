@@ -1,295 +1,354 @@
 #include "InstancedParticleRenderer.hpp"
+#include "Vulkan/VulkanDevice.hpp"
 #include "../Core/Logger.hpp"
-#include <glad/glad.h>
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <cstring>
+#include <algorithm>
+#include <cassert>
 
 namespace GameEngine {
 
-    Ref<Shader> InstancedParticleRenderer::s_ParticleShader = nullptr;
-    uint32_t InstancedParticleRenderer::s_QuadVAO = 0;
-    uint32_t InstancedParticleRenderer::s_QuadVBO = 0;
-    uint32_t InstancedParticleRenderer::s_InstanceVBO = 0;
-    uint32_t InstancedParticleRenderer::s_MaxParticles = 10000;
+    // =========================================================================
+    // Static definitions
+    // =========================================================================
+
+    VkBuffer      InstancedParticleRenderer::s_QuadVB          = VK_NULL_HANDLE;
+    VmaAllocation InstancedParticleRenderer::s_QuadVBAlloc     = VK_NULL_HANDLE;
+
+    VkBuffer      InstancedParticleRenderer::s_InstanceVB      = VK_NULL_HANDLE;
+    VmaAllocation InstancedParticleRenderer::s_InstanceVBAlloc = VK_NULL_HANDLE;
+    void*         InstancedParticleRenderer::s_InstanceMapped  = nullptr;
+    uint32_t      InstancedParticleRenderer::s_MaxParticles    = 10000;
+
     Ref<Texture2D> InstancedParticleRenderer::s_DefaultTexture = nullptr;
-    
+
+    std::unique_ptr<VulkanDescriptorSetLayout> InstancedParticleRenderer::s_DescLayout;
+    std::unique_ptr<VulkanDescriptorPool>      InstancedParticleRenderer::s_DescPool;
+    VkSampler      InstancedParticleRenderer::s_Sampler        = VK_NULL_HANDLE;
+    VkPipelineLayout InstancedParticleRenderer::s_PipelineLayout = VK_NULL_HANDLE;
+
+    std::vector<InstancedParticleRenderer::PipelineEntry> InstancedParticleRenderer::s_Pipelines;
+
     glm::mat4 InstancedParticleRenderer::s_ViewProjection = glm::mat4(1.0f);
-    glm::vec3 InstancedParticleRenderer::s_CameraRight = glm::vec3(1, 0, 0);
-    glm::vec3 InstancedParticleRenderer::s_CameraUp = glm::vec3(0, 1, 0);
-    
-    InstancedParticleRenderer::BlendMode InstancedParticleRenderer::s_BlendMode = BlendMode::Alpha;
-    bool InstancedParticleRenderer::s_SoftParticles = false;
-    float InstancedParticleRenderer::s_SoftParticleFadeDistance = 0.5f;
-    int InstancedParticleRenderer::s_AtlasColumns = 1;
-    int InstancedParticleRenderer::s_AtlasRows = 1;
-    
+    glm::vec3 InstancedParticleRenderer::s_CameraRight    = glm::vec3(1, 0, 0);
+    glm::vec3 InstancedParticleRenderer::s_CameraUp       = glm::vec3(0, 1, 0);
+
+    int   InstancedParticleRenderer::s_AtlasColumns    = 1;
+    int   InstancedParticleRenderer::s_AtlasRows       = 1;
+    bool  InstancedParticleRenderer::s_SoftParticles   = false;
+    float InstancedParticleRenderer::s_SoftFadeDistance = 0.5f;
+
+    VkRenderPass InstancedParticleRenderer::s_RenderPass = VK_NULL_HANDLE;
+
     InstancedParticleRenderer::Statistics InstancedParticleRenderer::s_Stats;
 
-    void InstancedParticleRenderer::Init() {
-        CreateResources();
-        GE_CORE_INFO("InstancedParticleRenderer initialized (max {} particles)", s_MaxParticles);
+    // =========================================================================
+    // Lifecycle
+    // =========================================================================
+
+    void InstancedParticleRenderer::Init(VkRenderPass renderPass, uint32_t maxParticles) {
+        s_MaxParticles = maxParticles;
+        s_RenderPass   = renderPass;
+
+        CreateQuadBuffers();
+        CreateInstanceBuffer(maxParticles);
+        CreateDefaultTexture();
+        CreateDescriptorResources();
+
+        // Pre-create pipeline for default blend mode (Alpha)
+        CreatePipeline(renderPass, BlendMode::Alpha);
+
+        GE_CORE_INFO("InstancedParticleRenderer initialized (Vulkan, max {} particles)", maxParticles);
     }
 
     void InstancedParticleRenderer::Shutdown() {
-        if (s_QuadVAO) {
-            glDeleteVertexArrays(1, &s_QuadVAO);
-            s_QuadVAO = 0;
-        }
-        if (s_QuadVBO) {
-            glDeleteBuffers(1, &s_QuadVBO);
-            s_QuadVBO = 0;
-        }
-        if (s_InstanceVBO) {
-            glDeleteBuffers(1, &s_InstanceVBO);
-            s_InstanceVBO = 0;
-        }
-        
-        s_ParticleShader.reset();
+        auto& dev = VulkanDevice::Get();
+        VkDevice d = dev.GetDevice();
+        VmaAllocator a = dev.GetAllocator();
+
+        vkDeviceWaitIdle(d);
+
+        for (auto& e : s_Pipelines) e.Pipeline.Destroy();
+        s_Pipelines.clear();
+
+        if (s_PipelineLayout) { vkDestroyPipelineLayout(d, s_PipelineLayout, nullptr); s_PipelineLayout = VK_NULL_HANDLE; }
+        if (s_Sampler)        { vkDestroySampler(d, s_Sampler, nullptr);               s_Sampler        = VK_NULL_HANDLE; }
+
+        s_DescLayout.reset();
+        s_DescPool.reset();
+
+        if (s_QuadVB)      { vmaDestroyBuffer(a, s_QuadVB,      s_QuadVBAlloc);      s_QuadVB      = VK_NULL_HANDLE; }
+        if (s_InstanceVB)  { vmaDestroyBuffer(a, s_InstanceVB,  s_InstanceVBAlloc);  s_InstanceVB  = VK_NULL_HANDLE; }
+
         s_DefaultTexture.reset();
     }
 
-    void InstancedParticleRenderer::CreateResources() {
-        // Create particle shader
-        const char* vertexSrc = R"(
-            #version 420 core
-            
-            // Per-vertex attributes (quad corners)
-            layout(location = 0) in vec2 a_Position;
-            layout(location = 1) in vec2 a_TexCoord;
-            
-            // Per-instance attributes
-            layout(location = 2) in vec3 a_InstancePosition;
-            layout(location = 3) in float a_InstanceSize;
-            layout(location = 4) in vec4 a_InstanceColor;
-            layout(location = 5) in float a_InstanceRotation;
-            layout(location = 6) in float a_InstanceLife;
-            
-            uniform mat4 u_ViewProjection;
-            uniform vec3 u_CameraRight;
-            uniform vec3 u_CameraUp;
-            uniform ivec2 u_AtlasSize;
-            
-            out vec2 v_TexCoord;
-            out vec4 v_Color;
-            out float v_Life;
-            
-            void main() {
-                // Calculate billboard position
-                float cosR = cos(a_InstanceRotation);
-                float sinR = sin(a_InstanceRotation);
-                
-                vec2 rotatedPos;
-                rotatedPos.x = a_Position.x * cosR - a_Position.y * sinR;
-                rotatedPos.y = a_Position.x * sinR + a_Position.y * cosR;
-                
-                vec3 worldPos = a_InstancePosition 
-                    + u_CameraRight * rotatedPos.x * a_InstanceSize
-                    + u_CameraUp * rotatedPos.y * a_InstanceSize;
-                
-                gl_Position = u_ViewProjection * vec4(worldPos, 1.0);
-                
-                // Calculate texture coordinates for atlas
-                vec2 atlasCell = vec2(0.0);  // Could be passed per-instance
-                vec2 cellSize = vec2(1.0 / float(u_AtlasSize.x), 1.0 / float(u_AtlasSize.y));
-                v_TexCoord = atlasCell * cellSize + a_TexCoord * cellSize;
-                
-                v_Color = a_InstanceColor;
-                v_Life = a_InstanceLife;
-            }
-        )";
-        
-        const char* fragmentSrc = R"(
-            #version 420 core
-            
-            in vec2 v_TexCoord;
-            in vec4 v_Color;
-            in float v_Life;
-            
-            uniform sampler2D u_Texture;
-            uniform bool u_SoftParticles;
-            uniform float u_SoftFadeDistance;
-            uniform sampler2D u_DepthTexture;
-            uniform vec2 u_ScreenSize;
-            
-            layout(location = 0) out vec4 FragColor;
-            
-            void main() {
-                vec4 texColor = texture(u_Texture, v_TexCoord);
-                FragColor = texColor * v_Color;
-                
-                // Soft particles (optional depth fade)
-                if (u_SoftParticles) {
-                    vec2 screenUV = gl_FragCoord.xy / u_ScreenSize;
-                    float sceneDepth = texture(u_DepthTexture, screenUV).r;
-                    float particleDepth = gl_FragCoord.z;
-                    float depthDiff = sceneDepth - particleDepth;
-                    float fade = smoothstep(0.0, u_SoftFadeDistance, depthDiff);
-                    FragColor.a *= fade;
-                }
-                
-                // Discard fully transparent pixels
-                if (FragColor.a < 0.01)
-                    discard;
-            }
-        )";
-        
-        s_ParticleShader = CreateRef<Shader>("InstancedParticle", vertexSrc, fragmentSrc);
-        
-        // Create quad geometry
-        float quadVertices[] = {
-            // Position     // TexCoord
-            -0.5f, -0.5f,   0.0f, 0.0f,
-             0.5f, -0.5f,   1.0f, 0.0f,
-             0.5f,  0.5f,   1.0f, 1.0f,
-            -0.5f, -0.5f,   0.0f, 0.0f,
-             0.5f,  0.5f,   1.0f, 1.0f,
-            -0.5f,  0.5f,   0.0f, 1.0f
+    // =========================================================================
+    // Resource creation
+    // =========================================================================
+
+    void InstancedParticleRenderer::CreateQuadBuffers() {
+        // Billboard quad: two triangles, positions [-0.5, 0.5] x [-0.5, 0.5]
+        // Binding 0, location 0 = vec2 position, location 1 = vec2 texcoord
+        struct QuadVertex { glm::vec2 Pos; glm::vec2 UV; };
+        static const QuadVertex verts[6] = {
+            {{-0.5f, -0.5f}, {0, 0}},
+            {{ 0.5f, -0.5f}, {1, 0}},
+            {{ 0.5f,  0.5f}, {1, 1}},
+            {{-0.5f, -0.5f}, {0, 0}},
+            {{ 0.5f,  0.5f}, {1, 1}},
+            {{-0.5f,  0.5f}, {0, 1}},
         };
-        
-        glGenVertexArrays(1, &s_QuadVAO);
-        glGenBuffers(1, &s_QuadVBO);
-        glGenBuffers(1, &s_InstanceVBO);
-        
-        glBindVertexArray(s_QuadVAO);
-        
-        // Quad vertex buffer
-        glBindBuffer(GL_ARRAY_BUFFER, s_QuadVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
-        
-        // Position
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-        
-        // TexCoord
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-        
-        // Instance buffer
-        glBindBuffer(GL_ARRAY_BUFFER, s_InstanceVBO);
-        glBufferData(GL_ARRAY_BUFFER, s_MaxParticles * sizeof(ParticleInstance), nullptr, GL_DYNAMIC_DRAW);
-        
-        // Instance position
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(ParticleInstance), (void*)offsetof(ParticleInstance, Position));
-        glVertexAttribDivisor(2, 1);
-        
-        // Instance size
-        glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(ParticleInstance), (void*)offsetof(ParticleInstance, Size));
-        glVertexAttribDivisor(3, 1);
-        
-        // Instance color
-        glEnableVertexAttribArray(4);
-        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(ParticleInstance), (void*)offsetof(ParticleInstance, Color));
-        glVertexAttribDivisor(4, 1);
-        
-        // Instance rotation
-        glEnableVertexAttribArray(5);
-        glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(ParticleInstance), (void*)offsetof(ParticleInstance, Rotation));
-        glVertexAttribDivisor(5, 1);
-        
-        // Instance life
-        glEnableVertexAttribArray(6);
-        glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(ParticleInstance), (void*)offsetof(ParticleInstance, LifeRemaining));
-        glVertexAttribDivisor(6, 1);
-        
-        glBindVertexArray(0);
-        
-        // Create 1x1 white default texture
-        uint32_t whitePixel = 0xFFFFFFFF;
-        s_DefaultTexture = CreateRef<Texture2D>(1, 1);
-        s_DefaultTexture->SetData(&whitePixel, sizeof(uint32_t));
+
+        VkDeviceSize size = sizeof(verts);
+        auto& dev = VulkanDevice::Get();
+        VmaAllocator a = dev.GetAllocator();
+
+        // Staging
+        VkBuffer stageBuf;
+        VmaAllocation stageAlloc;
+        VmaAllocationInfo stageInfo{};
+        VkBufferCreateInfo sbci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        sbci.size  = size;
+        sbci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        VmaAllocationCreateInfo saci{};
+        saci.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+        saci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        vmaCreateBuffer(a, &sbci, &saci, &stageBuf, &stageAlloc, &stageInfo);
+        std::memcpy(stageInfo.pMappedData, verts, size);
+
+        // Device-local
+        VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bci.size  = size;
+        bci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        VmaAllocationCreateInfo vaci{};
+        vaci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        vmaCreateBuffer(a, &bci, &vaci, &s_QuadVB, &s_QuadVBAlloc, nullptr);
+
+        VkCommandBuffer cmd = dev.BeginSingleTimeCommands();
+        VkBufferCopy copy{0, 0, size};
+        vkCmdCopyBuffer(cmd, stageBuf, s_QuadVB, 1, &copy);
+        dev.EndSingleTimeCommands(cmd);
+        vmaDestroyBuffer(a, stageBuf, stageAlloc);
     }
+
+    void InstancedParticleRenderer::CreateInstanceBuffer(uint32_t maxParticles) {
+        auto& dev = VulkanDevice::Get();
+        VkDeviceSize size = maxParticles * sizeof(ParticleInstance);
+
+        VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bci.size  = size;
+        bci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+        VmaAllocationCreateInfo aci{};
+        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo ai{};
+        vmaCreateBuffer(dev.GetAllocator(), &bci, &aci,
+                        &s_InstanceVB, &s_InstanceVBAlloc, &ai);
+        s_InstanceMapped = ai.pMappedData;
+    }
+
+    void InstancedParticleRenderer::CreateDefaultTexture() {
+        s_DefaultTexture = CreateRef<Texture2D>(1, 1, TextureFormat::RGBA);
+        uint32_t white = 0xFFFFFFFF;
+        s_DefaultTexture->SetData(&white, sizeof(white));
+    }
+
+    void InstancedParticleRenderer::CreateDescriptorResources() {
+        VkDevice d = VulkanDevice::Get().GetDevice();
+
+        // Linear sampler, repeat
+        VkSamplerCreateInfo sci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sci.magFilter    = VK_FILTER_LINEAR;
+        sci.minFilter    = VK_FILTER_LINEAR;
+        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        vkCreateSampler(d, &sci, nullptr, &s_Sampler);
+
+        // Descriptor layout: binding 0 = particle texture
+        s_DescLayout = VulkanDescriptorSetLayout::Builder()
+            .AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        VK_SHADER_STAGE_FRAGMENT_BIT)
+            .Build();
+
+        s_DescPool = VulkanDescriptorPool::Builder()
+            .AddPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64)
+            .SetMaxSets(64)
+            .Build();
+    }
+
+    void InstancedParticleRenderer::CreatePipeline(VkRenderPass renderPass, BlendMode blendMode) {
+        VkDevice d = VulkanDevice::Get().GetDevice();
+
+        if (!s_PipelineLayout) {
+            VkPushConstantRange pcr{};
+            pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+            pcr.size       = sizeof(PushConstants);
+
+            VkDescriptorSetLayout setLayout = s_DescLayout->GetDescriptorSetLayout();
+            VkPipelineLayoutCreateInfo plci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+            plci.setLayoutCount         = 1;
+            plci.pSetLayouts            = &setLayout;
+            plci.pushConstantRangeCount = 1;
+            plci.pPushConstantRanges    = &pcr;
+            vkCreatePipelineLayout(d, &plci, nullptr, &s_PipelineLayout);
+        }
+
+        PipelineConfigInfo cfg{};
+        VulkanPipeline::DefaultPipelineConfigInfo(cfg);
+        cfg.RenderPass     = renderPass;
+        cfg.PipelineLayout = s_PipelineLayout;
+
+        // Depth test on, depth write off (particles are transparent)
+        cfg.DepthStencilInfo.depthTestEnable  = VK_TRUE;
+        cfg.DepthStencilInfo.depthWriteEnable = VK_FALSE;
+
+        switch (blendMode) {
+            case BlendMode::Additive: {
+                cfg.ColorBlendAttachment.blendEnable         = VK_TRUE;
+                cfg.ColorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+                cfg.ColorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                cfg.ColorBlendAttachment.colorBlendOp        = VK_BLEND_OP_ADD;
+                cfg.ColorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                cfg.ColorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+                cfg.ColorBlendAttachment.alphaBlendOp        = VK_BLEND_OP_ADD;
+                break;
+            }
+            case BlendMode::Multiply: {
+                cfg.ColorBlendAttachment.blendEnable         = VK_TRUE;
+                cfg.ColorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
+                cfg.ColorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+                cfg.ColorBlendAttachment.colorBlendOp        = VK_BLEND_OP_ADD;
+                cfg.ColorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                cfg.ColorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+                cfg.ColorBlendAttachment.alphaBlendOp        = VK_BLEND_OP_ADD;
+                break;
+            }
+            default: // Alpha
+                VulkanPipeline::EnableAlphaBlending(cfg);
+                break;
+        }
+        cfg.ColorBlendAttachment.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        cfg.ColorBlendInfo.attachmentCount = 1;
+        cfg.ColorBlendInfo.pAttachments    = &cfg.ColorBlendAttachment;
+
+        PipelineEntry entry{};
+        entry.Mode = blendMode;
+        entry.Pipeline.CreateGraphicsPipeline(
+            "Assets/Shaders/Particle.vert.spv",
+            "Assets/Shaders/Particle.frag.spv",
+            cfg);
+        s_Pipelines.push_back(std::move(entry));
+    }
+
+    VulkanPipeline* InstancedParticleRenderer::GetOrCreatePipeline(VkRenderPass renderPass,
+                                                                     BlendMode mode) {
+        for (auto& e : s_Pipelines) {
+            if (e.Mode == mode) return &e.Pipeline;
+        }
+        CreatePipeline(renderPass, mode);
+        return &s_Pipelines.back().Pipeline;
+    }
+
+    // =========================================================================
+    // Per-frame
+    // =========================================================================
 
     void InstancedParticleRenderer::Begin(const Camera3D& camera) {
         s_ViewProjection = camera.GetViewProjectionMatrix();
-        
-        // Extract camera right and up vectors from view matrix
-        glm::mat4 view = camera.GetViewMatrix();
+        glm::mat4 view   = camera.GetViewMatrix();
+        // Column-major: view[col][row]
         s_CameraRight = glm::vec3(view[0][0], view[1][0], view[2][0]);
-        s_CameraUp = glm::vec3(view[0][1], view[1][1], view[2][1]);
-        
+        s_CameraUp    = glm::vec3(view[0][1], view[1][1], view[2][1]);
         ResetStats();
     }
 
-    void InstancedParticleRenderer::End() {
-        // Nothing to flush - particles are drawn immediately
-    }
+    void InstancedParticleRenderer::End() {}
+
+    // =========================================================================
+    // Draw
+    // =========================================================================
 
     void InstancedParticleRenderer::DrawParticles(
+        VkCommandBuffer cmd,
         const std::vector<ParticleInstance>& particles,
-        const Ref<Texture2D>& texture
-    ) {
+        const Ref<Texture2D>& texture,
+        BlendMode blendMode) {
+
         if (particles.empty()) return;
-        
-        size_t particleCount = std::min(particles.size(), static_cast<size_t>(s_MaxParticles));
-        
-        // Update instance buffer
-        glBindBuffer(GL_ARRAY_BUFFER, s_InstanceVBO);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, particleCount * sizeof(ParticleInstance), particles.data());
-        
-        // Setup blending
-        glEnable(GL_BLEND);
-        switch (s_BlendMode) {
-            case BlendMode::Additive:
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-                break;
-            case BlendMode::Alpha:
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                break;
-            case BlendMode::Multiply:
-                glBlendFunc(GL_DST_COLOR, GL_ZERO);
-                break;
-        }
-        
-        // Disable depth writing (but keep depth testing)
-        glDepthMask(GL_FALSE);
-        
-        // Bind shader and set uniforms
-        s_ParticleShader->Bind();
-        s_ParticleShader->SetUniformMat4("u_ViewProjection", s_ViewProjection);
-        s_ParticleShader->SetUniformVec3("u_CameraRight", s_CameraRight);
-        s_ParticleShader->SetUniformVec3("u_CameraUp", s_CameraUp);
-        s_ParticleShader->SetUniformInt("u_AtlasSize", s_AtlasColumns);
-        s_ParticleShader->SetUniformBool("u_SoftParticles", s_SoftParticles);
-        s_ParticleShader->SetUniformFloat("u_SoftFadeDistance", s_SoftParticleFadeDistance);
-        
-        // Bind texture
-        if (texture) {
-            texture->Bind(0);
-        } else {
-            s_DefaultTexture->Bind(0);
-        }
-        s_ParticleShader->SetUniformInt("u_Texture", 0);
-        
-        // Draw instanced
-        glBindVertexArray(s_QuadVAO);
-        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(particleCount));
-        glBindVertexArray(0);
-        
-        // Restore state
-        glDepthMask(GL_TRUE);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        
-        s_ParticleShader->Unbind();
-        
-        // Update stats
+
+        uint32_t count = static_cast<uint32_t>(
+            std::min(particles.size(), static_cast<size_t>(s_MaxParticles)));
+
+        // Upload instance data
+        std::memcpy(s_InstanceMapped, particles.data(), count * sizeof(ParticleInstance));
+        vmaFlushAllocation(VulkanDevice::Get().GetAllocator(),
+                           s_InstanceVBAlloc, 0, count * sizeof(ParticleInstance));
+
+        // Bind texture descriptor
+        const Ref<Texture2D>& tex = texture ? texture : s_DefaultTexture;
+        VkDescriptorImageInfo imgInfo{};
+        imgInfo.sampler     = s_Sampler;
+        imgInfo.imageView   = tex->GetImageView();
+        imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkDescriptorSet descSet = VK_NULL_HANDLE;
+        VulkanDescriptorWriter(*s_DescLayout, *s_DescPool)
+            .WriteImage(0, &imgInfo)
+            .Build(descSet);
+
+        // Select pipeline
+        VulkanPipeline* pipeline = GetOrCreatePipeline(s_RenderPass, blendMode);
+        pipeline->Bind(cmd);
+
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                s_PipelineLayout, 0, 1, &descSet, 0, nullptr);
+
+        // Push constants
+        PushConstants pc{};
+        pc.ViewProjection   = s_ViewProjection;
+        pc.CameraRight      = glm::vec4(s_CameraRight, 0.0f);
+        pc.CameraUp         = glm::vec4(s_CameraUp, 0.0f);
+        pc.AtlasSize        = glm::ivec2(s_AtlasColumns, s_AtlasRows);
+        pc.SoftFadeDistance = s_SoftFadeDistance;
+        pc.SoftParticles    = s_SoftParticles ? 1 : 0;
+        vkCmdPushConstants(cmd, s_PipelineLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(pc), &pc);
+
+        // Bind vertex buffers: binding 0 = quad, binding 1 = instance data
+        VkBuffer vbs[2]     = {s_QuadVB, s_InstanceVB};
+        VkDeviceSize offs[2] = {0, 0};
+        vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offs);
+
+        // Draw 6 vertices (2 triangles per quad) x count instances
+        vkCmdDraw(cmd, 6, count, 0, 0);
+
         s_Stats.DrawCalls++;
-        s_Stats.ParticlesRendered += static_cast<uint32_t>(particleCount);
+        s_Stats.ParticlesRendered += count;
         s_Stats.BatchCount++;
     }
 
-    void InstancedParticleRenderer::SetBlendMode(BlendMode mode) {
-        s_BlendMode = mode;
-    }
-
-    void InstancedParticleRenderer::SetSoftParticles(bool enabled, float fadeDistance) {
-        s_SoftParticles = enabled;
-        s_SoftParticleFadeDistance = fadeDistance;
-    }
+    // =========================================================================
+    // Config
+    // =========================================================================
 
     void InstancedParticleRenderer::SetAtlasSize(int columns, int rows) {
         s_AtlasColumns = columns;
-        s_AtlasRows = rows;
+        s_AtlasRows    = rows;
     }
 
-}
+    void InstancedParticleRenderer::SetSoftParticles(bool enabled, float fadeDistance) {
+        s_SoftParticles   = enabled;
+        s_SoftFadeDistance = fadeDistance;
+    }
+
+} // namespace GameEngine

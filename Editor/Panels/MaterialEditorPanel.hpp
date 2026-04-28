@@ -3,6 +3,7 @@
 #include "../../Engine/Core/Base.hpp"
 #include "../../Engine/Graphics/Material.hpp"
 #include "../../Engine/Graphics/Texture2D.hpp"
+#include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -96,10 +97,9 @@ namespace GameEngine {
         Ref<Texture2D> m_EmissionMap;
         Ref<Texture2D> m_HeightMap;
 
-        // Preview
-        uint32_t m_PreviewFramebuffer = 0;
-        uint32_t m_PreviewTexture = 0;
-        uint32_t m_PreviewDepthBuffer = 0;
+        // Preview (Vulkan texture + ImGui descriptor)
+        Ref<Texture2D> m_PreviewTexture;
+        VkDescriptorSet m_PreviewImGuiDescriptor = VK_NULL_HANDLE;
         int m_PreviewSize = 128;
         bool m_PreviewNeedsUpdate = true;
         int m_PreviewMeshType = 0;  // 0=Sphere, 1=Cube, 2=Plane, 3=Cylinder

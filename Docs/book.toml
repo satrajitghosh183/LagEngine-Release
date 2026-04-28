@@ -1,0 +1,12 @@
+[book]
+title = "LAG Engine Documentation"
+description = "Modular C++17 game engine with Vulkan rendering, multi-physics, Lua + LAGScript, and an editor."
+authors = ["Satrajit Ghosh"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+mathjax-support = true
+git-repository-url = "https://github.com/satrajitghosh183/LAG-Engine"

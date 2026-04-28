@@ -149,8 +149,8 @@ public:
                     }
 
                     // find triangles from both bodies that are in the intersection
-                    std::vector<std::vector<GLint>> bodyTrianglesInIntersection;
-                    std::vector<GLint> bodyIndices = body->trianglesPerLevel()[body->collisionLevel()];
+                    std::vector<std::vector<int32_t>> bodyTrianglesInIntersection;
+                    std::vector<int32_t> bodyIndices = body->trianglesPerLevel()[body->collisionLevel()];
                     for (unsigned int k = 0; k < bodyIndices.size(); k += 3) {
                         glm::vec3 t0 = body->particles()[bodyIndices[k]]->predictedPosition;
                         glm::vec3 t1 = body->particles()[bodyIndices[k + 1]]->predictedPosition;
@@ -161,8 +161,8 @@ public:
                         bodyTrianglesInIntersection.push_back({bodyIndices[k], bodyIndices[k + 1], bodyIndices[k + 2]});
                     }
 
-                    std::vector<std::vector<GLint>> otherBodyTrianglesInIntersection;
-                    std::vector<GLint> otherBodyIndices = otherBody->trianglesPerLevel()[otherBody->collisionLevel()];
+                    std::vector<std::vector<int32_t>> otherBodyTrianglesInIntersection;
+                    std::vector<int32_t> otherBodyIndices = otherBody->trianglesPerLevel()[otherBody->collisionLevel()];
                     for (unsigned int k = 0; k < otherBodyIndices.size(); k += 3) {
                         glm::vec3 t0 = otherBody->particles()[otherBodyIndices[k]]->predictedPosition;
                         glm::vec3 t1 = otherBody->particles()[otherBodyIndices[k + 1]]->predictedPosition;

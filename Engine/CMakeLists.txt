@@ -2,6 +2,7 @@
 file(GLOB_RECURSE ENGINE_SOURCES
     "Assets/*.cpp"
     "Build/*.cpp"
+    "Compute/*.cpp"
     "Core/*.cpp"
     "Graphics/*.cpp"
     "Physics/*.cpp"
@@ -22,6 +23,7 @@ file(GLOB_RECURSE ENGINE_SOURCES
 file(GLOB_RECURSE ENGINE_HEADERS
     "Assets/*.hpp"
     "Build/*.hpp"
+    "Compute/*.hpp"
     "Core/*.hpp"
     "Graphics/*.hpp"
     "Physics/*.hpp"
@@ -64,24 +66,58 @@ target_include_directories(GameEngine
 # Both the library and any consumer (Tests) must use the same setting.
 target_compile_definitions(GameEngine PUBLIC GLM_FORCE_CTOR_INIT)
 
-# Link dependencies
+# GLM tweaks: radians-everywhere prevents accidental deg/rad conversions in
+# hot paths, and 0..1 depth range matches Vulkan's clip space (vs GL's -1..1).
+# GLM_FORCE_INTRINSICS is intentionally NOT set — it makes some glm::pi()-style
+# helpers non-constexpr which breaks compile-time constants in MathUtils.hpp.
+target_compile_definitions(GameEngine PUBLIC
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+
+# Apply fast-math + arch-native to the engine library only (PRIVATE).
+# Consumers can still build with strict math without inheriting these flags.
+if(GE_HOT_PATH_FLAGS)
+    target_compile_options(GameEngine PRIVATE
+        $<$<CONFIG:Release>:${GE_HOT_PATH_FLAGS}>
+        $<$<CONFIG:RelWithDebInfo>:${GE_HOT_PATH_FLAGS}>
+    )
+endif()
+
+# Vulkan rendering backend
+target_compile_definitions(GameEngine PUBLIC GE_RENDERER_VULKAN)
+
+# Link dependencies — Vulkan replaces GLAD/OpenGL
 target_link_libraries(GameEngine
     PUBLIC
         glfw
-        glad
+        Vulkan::Vulkan
         glm
         nlohmann_json
         imgui
         lua
-    PRIVATE
         stb_image
 )
 
-# Optional: Link ImGui if available (for backward compatibility, but Editor should link it)
-# Editor target will link imgui separately
-if(TARGET imgui)
-    # Only link if explicitly requested (for backward compatibility)
-    # target_link_libraries(GameEngine PUBLIC imgui)
+# VMA (Vulkan Memory Allocator)
+if(TARGET GPUOpen::VulkanMemoryAllocator)
+    target_link_libraries(GameEngine PUBLIC GPUOpen::VulkanMemoryAllocator)
+elseif(TARGET VulkanMemoryAllocator)
+    target_link_libraries(GameEngine PUBLIC VulkanMemoryAllocator)
+else()
+    # Fallback: include VMA header directory directly from FetchContent
+    if(vma_SOURCE_DIR)
+        target_include_directories(GameEngine PUBLIC ${vma_SOURCE_DIR}/include)
+    endif()
+endif()
+
+# shaderc for runtime GLSL -> SPIR-V compilation
+if(TARGET Vulkan::shaderc_combined)
+    target_link_libraries(GameEngine PRIVATE Vulkan::shaderc_combined)
+    target_compile_definitions(GameEngine PRIVATE GE_HAS_SHADERC)
+elseif(TARGET shaderc_combined)
+    target_link_libraries(GameEngine PRIVATE shaderc_combined)
+    target_compile_definitions(GameEngine PRIVATE GE_HAS_SHADERC)
 endif()
 
 # Link Assimp for asset importing
@@ -99,22 +135,36 @@ elseif(TARGET alsoft)
     target_compile_definitions(GameEngine PRIVATE GE_HAS_OPENAL)
 endif()
 
-# Platform-specific libraries
+# CUDA compute integration (optional)
+include(CheckLanguage)
+check_language(CUDA)
+if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA)
+    find_package(CUDAToolkit QUIET)
+    if(CUDAToolkit_FOUND)
+        target_link_libraries(GameEngine PRIVATE CUDA::cudart)
+        target_compile_definitions(GameEngine PUBLIC GE_HAS_CUDA)
+        target_include_directories(GameEngine PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+        message(STATUS "CUDA support enabled: ${CUDAToolkit_VERSION}")
+    endif()
+else()
+    message(STATUS "CUDA not found — building without GPU compute support")
+endif()
+
+# Platform-specific libraries (no more OpenGL)
 if(WIN32)
-    target_link_libraries(GameEngine PRIVATE opengl32 winhttp ws2_32)
+    target_link_libraries(GameEngine PRIVATE winhttp ws2_32)
 elseif(UNIX AND NOT APPLE)
-    target_link_libraries(GameEngine PRIVATE GL X11 pthread dl)
+    target_link_libraries(GameEngine PRIVATE X11 pthread dl)
 elseif(APPLE)
     find_library(COCOA_LIBRARY Cocoa REQUIRED)
     find_library(IOKIT_LIBRARY IOKit REQUIRED)
     find_library(COREVIDEO_LIBRARY CoreVideo REQUIRED)
-    find_library(OPENGL_LIBRARY OpenGL REQUIRED)
-    
+
     target_link_libraries(GameEngine PRIVATE
         ${COCOA_LIBRARY}
         ${IOKIT_LIBRARY}
         ${COREVIDEO_LIBRARY}
-        ${OPENGL_LIBRARY}
     )
 endif()
 

@@ -1,8 +1,12 @@
 #pragma once
 
 #include "../Core/Base.hpp"
+#include "Vulkan/VulkanDevice.hpp"
+#include "VertexArray.hpp"
+#include "Texture2D.hpp"
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
-#include <glad/glad.h>
 #include <string>
 #include <vector>
 #include <array>
@@ -16,10 +20,21 @@ namespace GameEngine {
         glm::vec2 TexCoord;
     };
 
+    /**
+     * @brief Heightmap / noise-generated terrain mesh backed by Vulkan buffers.
+     *
+     * All geometry lives in a VkBuffer (vertex + index) allocated via VMA.
+     * Textures are Texture2D objects (VkImage + VkSampler).
+     * Rendering is done by calling Render(VkCommandBuffer) which records
+     * vkCmdDraw* into an already-active render pass.
+     */
     class Terrain {
     public:
         Terrain() = default;
         ~Terrain();
+
+        Terrain(const Terrain&) = delete;
+        Terrain& operator=(const Terrain&) = delete;
 
         bool loadFromHeightmap(const std::string& path, float width, float depth, float maxHeight);
         void generateFromNoise(float width, float depth, int resolution, uint32_t seed);
@@ -27,19 +42,39 @@ namespace GameEngine {
         float getHeightAt(float x, float z) const;
         glm::vec3 getNormalAt(float x, float z) const;
 
+        /** Load a texture into a terrain layer (index 0-3). */
         void setTextureLayer(int index, const std::string& texturePath, float scale);
+
+        /** Load the blend map texture. */
         void setBlendMap(const std::string& path);
 
-        void render() const;
+        /**
+         * @brief Record draw commands into cmd.
+         *
+         * The caller must have already:
+         *  - begun a render pass
+         *  - bound the terrain pipeline and descriptor sets (textures, UBOs)
+         *
+         * This method calls:
+         *  vkCmdBindVertexBuffers / vkCmdBindIndexBuffer / vkCmdDrawIndexed
+         */
+        void render(VkCommandBuffer cmd) const;
 
-        float getWidth() const { return m_Width; }
-        float getDepth() const { return m_Depth; }
-        float getMaxHeight() const { return m_MaxHeight; }
-        int getResolution() const { return m_Resolution; }
+        float    getWidth()      const { return m_Width; }
+        float    getDepth()      const { return m_Depth; }
+        float    getMaxHeight()  const { return m_MaxHeight; }
+        int      getResolution() const { return m_Resolution; }
+        uint32_t getIndexCount() const { return m_IndexCount; }
+
+        // Descriptor info for each texture layer and the blend map
+        VkDescriptorImageInfo getBlendMapDescriptor() const;
+        VkDescriptorImageInfo getLayerDescriptor(int index) const;
 
     private:
         void buildMesh();
         void uploadToGPU();
+        void destroyGPUResources();
+
         float sampleHeight(int x, int z) const;
         glm::vec3 computeNormal(int x, int z) const;
 
@@ -49,35 +84,39 @@ namespace GameEngine {
         static float grad2D(int hash, float x, float y);
         static float fade(float t);
 
-        float m_Width = 256.0f;
-        float m_Depth = 256.0f;
-        float m_MaxHeight = 50.0f;
-        int m_Resolution = 256;
+        float m_Width      = 256.0f;
+        float m_Depth      = 256.0f;
+        float m_MaxHeight  = 50.0f;
+        int   m_Resolution = 256;
 
-        std::vector<float> m_HeightData; // (resolution+1) x (resolution+1)
+        std::vector<float>         m_HeightData; // (resolution+1)*(resolution+1)
         std::vector<TerrainVertex> m_Vertices;
-        std::vector<uint32_t> m_Indices;
+        std::vector<uint32_t>      m_Indices;
+        uint32_t                   m_IndexCount = 0;
 
-        GLuint m_VAO = 0, m_VBO = 0, m_IBO = 0;
-        uint32_t m_IndexCount = 0;
+        // Vulkan geometry buffers
+        VkBuffer      m_VertexBuffer     = VK_NULL_HANDLE;
+        VmaAllocation m_VertexAllocation = VK_NULL_HANDLE;
+        VkBuffer      m_IndexBuffer      = VK_NULL_HANDLE;
+        VmaAllocation m_IndexAllocation  = VK_NULL_HANDLE;
 
+        // Textures
         struct TextureLayer {
-            GLuint TextureID = 0;
+            Scope<Texture2D> Texture;
             float Scale = 10.0f;
-            std::string Path;
         };
         std::array<TextureLayer, 4> m_TextureLayers;
-        GLuint m_BlendMapTexture = 0;
+        Scope<Texture2D>            m_BlendMap;
     };
 
     struct TerrainComponent {
         std::string HeightmapPath;
-        float Width = 256.0f;
-        float Depth = 256.0f;
+        float Width    = 256.0f;
+        float Depth    = 256.0f;
         float MaxHeight = 50.0f;
-        int Resolution = 256;
+        int   Resolution = 256;
         std::array<std::string, 4> TextureLayers;
-        std::array<float, 4> TextureScales = {10.0f, 10.0f, 10.0f, 10.0f};
+        std::array<float, 4>       TextureScales = {10.0f, 10.0f, 10.0f, 10.0f};
         std::string BlendMapPath;
         Ref<Terrain> TerrainData;
     };

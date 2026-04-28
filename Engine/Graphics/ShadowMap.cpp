@@ -1,191 +1,264 @@
 #include "ShadowMap.hpp"
+#include "Vulkan/VulkanDevice.hpp"
 #include "../Core/Logger.hpp"
-#include <glad/glad.h>
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <array>
 
 namespace GameEngine {
 
-    Ref<Shader> ShadowMap::s_DepthShader = nullptr;
+    // =========================================================================
+    // ShadowMap
+    // =========================================================================
 
     ShadowMap::ShadowMap(uint32_t resolution)
         : m_Resolution(resolution) {
-        
-        // Create framebuffer
-        glGenFramebuffers(1, &m_FBO);
-        
-        // Create depth texture
-        glGenTextures(1, &m_DepthTexture);
-        glBindTexture(GL_TEXTURE_2D, m_DepthTexture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 
-                     m_Resolution, m_Resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-        
-        // Texture parameters
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-        
-        // Border color for areas outside shadow map
-        float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-        
-        // Attach to framebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, m_FBO);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_DepthTexture, 0);
-        
-        // No color buffer
-        glDrawBuffer(GL_NONE);
-        glReadBuffer(GL_NONE);
-        
-        // Check completeness
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-            GE_CORE_ERROR("ShadowMap: Framebuffer incomplete!");
-        }
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        
-        GE_CORE_DEBUG("ShadowMap created: {}x{}", m_Resolution, m_Resolution);
+        CreateDepthResources();
+        CreateRenderPass();
+        CreateFramebuffer();
+        CreateSampler();
+        GE_CORE_INFO("ShadowMap created: {}x{}", resolution, resolution);
     }
 
     ShadowMap::~ShadowMap() {
-        if (m_DepthTexture) {
-            glDeleteTextures(1, &m_DepthTexture);
+        auto& dev = VulkanDevice::Get();
+        VkDevice d = dev.GetDevice();
+        VmaAllocator a = dev.GetAllocator();
+
+        vkDeviceWaitIdle(d);
+
+        if (m_Framebuffer) { vkDestroyFramebuffer(d, m_Framebuffer, nullptr); }
+        if (m_RenderPass)  { vkDestroyRenderPass(d, m_RenderPass, nullptr);   }
+        if (m_Sampler)     { vkDestroySampler(d, m_Sampler, nullptr);         }
+        if (m_DepthView)   { vkDestroyImageView(d, m_DepthView, nullptr);     }
+        if (m_DepthImage)  { vmaDestroyImage(a, m_DepthImage, m_DepthAlloc);  }
+    }
+
+    // -------------------------------------------------------------------------
+    // Resource creation
+    // -------------------------------------------------------------------------
+
+    void ShadowMap::CreateDepthResources() {
+        auto& dev = VulkanDevice::Get();
+        VkDevice d = dev.GetDevice();
+        VmaAllocator a = dev.GetAllocator();
+
+        VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ici.imageType   = VK_IMAGE_TYPE_2D;
+        ici.format      = VK_FORMAT_D32_SFLOAT;
+        ici.extent      = {m_Resolution, m_Resolution, 1};
+        ici.mipLevels   = 1;
+        ici.arrayLayers = 1;
+        ici.samples     = VK_SAMPLE_COUNT_1_BIT;
+        ici.tiling      = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage       = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                          VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VmaAllocationCreateInfo vaci{};
+        vaci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        if (vmaCreateImage(a, &ici, &vaci, &m_DepthImage, &m_DepthAlloc, nullptr) != VK_SUCCESS) {
+            GE_CORE_ERROR("ShadowMap: Failed to create depth image");
+            return;
         }
-        if (m_FBO) {
-            glDeleteFramebuffers(1, &m_FBO);
+
+        VkImageViewCreateInfo ivci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        ivci.image    = m_DepthImage;
+        ivci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        ivci.format   = VK_FORMAT_D32_SFLOAT;
+        ivci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        ivci.subresourceRange.levelCount = 1;
+        ivci.subresourceRange.layerCount = 1;
+        vkCreateImageView(d, &ivci, nullptr, &m_DepthView);
+    }
+
+    void ShadowMap::CreateRenderPass() {
+        VkDevice d = VulkanDevice::Get().GetDevice();
+
+        VkAttachmentDescription depthAtt{};
+        depthAtt.format         = VK_FORMAT_D32_SFLOAT;
+        depthAtt.samples        = VK_SAMPLE_COUNT_1_BIT;
+        depthAtt.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAtt.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+        depthAtt.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAtt.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthAtt.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkAttachmentReference depthRef{};
+        depthRef.attachment = 0;
+        depthRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription sub{};
+        sub.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        sub.colorAttachmentCount    = 0;
+        sub.pDepthStencilAttachment = &depthRef;
+
+        // Ensure writes are visible to the fragment shader in the lighting pass
+        std::array<VkSubpassDependency, 2> deps{};
+        deps[0].srcSubpass    = VK_SUBPASS_EXTERNAL;
+        deps[0].dstSubpass    = 0;
+        deps[0].srcStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        deps[0].dstStageMask  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        deps[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        deps[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+        deps[1].srcSubpass    = 0;
+        deps[1].dstSubpass    = VK_SUBPASS_EXTERNAL;
+        deps[1].srcStageMask  = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        deps[1].dstStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        deps[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        deps[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+        VkRenderPassCreateInfo rpci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        rpci.attachmentCount = 1;
+        rpci.pAttachments    = &depthAtt;
+        rpci.subpassCount    = 1;
+        rpci.pSubpasses      = &sub;
+        rpci.dependencyCount = static_cast<uint32_t>(deps.size());
+        rpci.pDependencies   = deps.data();
+
+        if (vkCreateRenderPass(d, &rpci, nullptr, &m_RenderPass) != VK_SUCCESS) {
+            GE_CORE_ERROR("ShadowMap: Failed to create render pass");
         }
     }
 
-    void ShadowMap::Begin() {
-        glGetIntegerv(GL_VIEWPORT, m_PreviousViewport);
-        glBindFramebuffer(GL_FRAMEBUFFER, m_FBO);
-        glViewport(0, 0, m_Resolution, m_Resolution);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        
-        // Enable depth testing and writing
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LESS);
-        
-        // Avoid shadow acne with front-face culling
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_FRONT);
+    void ShadowMap::CreateFramebuffer() {
+        VkDevice d = VulkanDevice::Get().GetDevice();
+
+        VkFramebufferCreateInfo fci{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        fci.renderPass      = m_RenderPass;
+        fci.attachmentCount = 1;
+        fci.pAttachments    = &m_DepthView;
+        fci.width           = m_Resolution;
+        fci.height          = m_Resolution;
+        fci.layers          = 1;
+
+        if (vkCreateFramebuffer(d, &fci, nullptr, &m_Framebuffer) != VK_SUCCESS) {
+            GE_CORE_ERROR("ShadowMap: Failed to create framebuffer");
+        }
     }
 
-    void ShadowMap::End() {
-        glCullFace(GL_BACK);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(m_PreviousViewport[0], m_PreviousViewport[1],
-                   m_PreviousViewport[2], m_PreviousViewport[3]);
+    void ShadowMap::CreateSampler() {
+        VkDevice d = VulkanDevice::Get().GetDevice();
+
+        VkSamplerCreateInfo sci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sci.magFilter        = VK_FILTER_NEAREST;
+        sci.minFilter        = VK_FILTER_NEAREST;
+        sci.addressModeU     = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sci.addressModeV     = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sci.addressModeW     = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sci.borderColor      = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE; // outside = lit (no shadow)
+        sci.compareEnable    = VK_TRUE;                            // PCF-ready
+        sci.compareOp        = VK_COMPARE_OP_LESS_OR_EQUAL;
+        sci.mipmapMode       = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+        vkCreateSampler(d, &sci, nullptr, &m_Sampler);
     }
 
-    void ShadowMap::BindTexture(uint32_t slot) const {
-        glActiveTexture(GL_TEXTURE0 + slot);
-        glBindTexture(GL_TEXTURE_2D, m_DepthTexture);
+    // -------------------------------------------------------------------------
+    // Begin / End
+    // -------------------------------------------------------------------------
+
+    void ShadowMap::Begin(VkCommandBuffer cmd) {
+        VkClearValue clear{};
+        clear.depthStencil = {1.0f, 0};
+
+        VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        rpbi.renderPass        = m_RenderPass;
+        rpbi.framebuffer       = m_Framebuffer;
+        rpbi.renderArea.offset = {0, 0};
+        rpbi.renderArea.extent = {m_Resolution, m_Resolution};
+        rpbi.clearValueCount   = 1;
+        rpbi.pClearValues      = &clear;
+
+        vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+
+        VkViewport viewport{};
+        viewport.width    = static_cast<float>(m_Resolution);
+        viewport.height   = static_cast<float>(m_Resolution);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.extent = {m_Resolution, m_Resolution};
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
     }
 
-    glm::mat4 ShadowMap::CalculateDirectionalLightMatrix(
-        const glm::vec3& lightDirection,
-        const glm::vec3& sceneCenter,
-        float sceneRadius
-    ) const {
-        // Create orthographic projection for directional light
+    void ShadowMap::End(VkCommandBuffer cmd) {
+        vkCmdEndRenderPass(cmd);
+        // Depth image transitions to VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+        // automatically via the renderpass finalLayout.
+    }
+
+    // -------------------------------------------------------------------------
+    // Descriptor info
+    // -------------------------------------------------------------------------
+
+    VkDescriptorImageInfo ShadowMap::GetDepthDescriptorInfo() const {
+        VkDescriptorImageInfo info{};
+        info.sampler     = m_Sampler;
+        info.imageView   = m_DepthView;
+        info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        return info;
+    }
+
+    // -------------------------------------------------------------------------
+    // Light-space matrix helpers
+    // -------------------------------------------------------------------------
+
+    glm::mat4 ShadowMap::CalculateDirectionalLightMatrix(const glm::vec3& lightDirection,
+                                                          const glm::vec3& sceneCenter,
+                                                          float sceneRadius) const {
         glm::vec3 lightPos = sceneCenter - glm::normalize(lightDirection) * sceneRadius;
 
-        glm::mat4 lightView = glm::lookAt(
-            lightPos,
-            sceneCenter,
-            glm::vec3(0.0f, 1.0f, 0.0f)
-        );
+        glm::mat4 lightView = glm::lookAt(lightPos, sceneCenter, glm::vec3(0.0f, 1.0f, 0.0f));
 
-        // Orthographic projection to cover scene
         float orthoSize = sceneRadius * 1.5f;
-        glm::mat4 lightProjection = glm::ortho(
-            -orthoSize, orthoSize,
-            -orthoSize, orthoSize,
-            0.1f, sceneRadius * 3.0f
-        );
+        // Vulkan clip-space: Y is inverted, Z in [0,1].
+        // glm::ortho already handles Y; no extra correction needed for NDC depth.
+        glm::mat4 lightProj = glm::ortho(-orthoSize, orthoSize,
+                                          -orthoSize, orthoSize,
+                                          0.1f, sceneRadius * 3.0f);
+        // Flip Y for Vulkan NDC
+        lightProj[1][1] *= -1.0f;
 
-        return lightProjection * lightView;
+        return lightProj * lightView;
     }
 
-    glm::mat4 ShadowMap::CalculateSpotLightMatrix(
-        const glm::vec3& lightPosition,
-        const glm::vec3& lightDirection,
-        float outerConeAngle,
-        float nearPlane,
-        float farPlane
-    ) const {
-        // Create perspective projection for spot light
-        glm::mat4 lightView = glm::lookAt(
-            lightPosition,
-            lightPosition + glm::normalize(lightDirection),
-            glm::vec3(0.0f, 1.0f, 0.0f)
-        );
+    glm::mat4 ShadowMap::CalculateSpotLightMatrix(const glm::vec3& lightPosition,
+                                                   const glm::vec3& lightDirection,
+                                                   float outerConeAngle,
+                                                   float nearPlane,
+                                                   float farPlane) const {
+        glm::mat4 lightView = glm::lookAt(lightPosition,
+                                           lightPosition + glm::normalize(lightDirection),
+                                           glm::vec3(0.0f, 1.0f, 0.0f));
 
-        // Perspective projection matching spot light cone
-        float fov = outerConeAngle * 2.0f;  // Full cone angle
-        glm::mat4 lightProjection = glm::perspective(
-            glm::radians(fov),
-            1.0f,  // Square aspect ratio
-            nearPlane,
-            farPlane
-        );
+        float fov = outerConeAngle * 2.0f;
+        glm::mat4 lightProj = glm::perspective(glm::radians(fov), 1.0f, nearPlane, farPlane);
+        lightProj[1][1] *= -1.0f; // Vulkan Y flip
 
-        return lightProjection * lightView;
+        return lightProj * lightView;
     }
 
-    Ref<Shader> ShadowMap::GetDepthShader() {
-        if (!s_DepthShader) {
-            const char* vertexSrc = R"(
-                #version 420 core
-                layout(location = 0) in vec3 a_Position;
-                
-                uniform mat4 u_LightSpaceMatrix;
-                uniform mat4 u_Model;
-                
-                void main() {
-                    gl_Position = u_LightSpaceMatrix * u_Model * vec4(a_Position, 1.0);
-                }
-            )";
-            
-            const char* fragmentSrc = R"(
-                #version 420 core
-                void main() {
-                    // Depth is written automatically
-                }
-            )";
-            
-            s_DepthShader = CreateRef<Shader>("ShadowDepth", vertexSrc, fragmentSrc);
-        }
-        
-        return s_DepthShader;
-    }
-
-    // ShadowMapManager implementation
+    // =========================================================================
+    // ShadowMapManager
+    // =========================================================================
 
     ShadowMapManager::ShadowMapManager(int maxShadowCastingLights)
         : m_MaxLights(maxShadowCastingLights) {
-        
         m_ShadowMaps.reserve(maxShadowCastingLights);
         m_LightSpaceMatrices.resize(maxShadowCastingLights, glm::mat4(1.0f));
-        
-        // Create shadow maps
         for (int i = 0; i < maxShadowCastingLights; i++) {
             m_ShadowMaps.push_back(CreateScope<ShadowMap>(1024));
         }
-        
-        GE_CORE_INFO("ShadowMapManager created with {} shadow maps", maxShadowCastingLights);
-    }
-
-    void ShadowMapManager::BeginShadowPass() {
-        // Save current viewport
-        glGetIntegerv(GL_VIEWPORT, m_CurrentViewport);
-    }
-
-    void ShadowMapManager::EndShadowPass() {
-        // Restore viewport
-        glViewport(m_CurrentViewport[0], m_CurrentViewport[1], 
-                   m_CurrentViewport[2], m_CurrentViewport[3]);
+        GE_CORE_INFO("ShadowMapManager: {} shadow maps created", maxShadowCastingLights);
     }
 
     void ShadowMapManager::RenderDirectionalShadow(
@@ -193,32 +266,19 @@ namespace GameEngine {
         const glm::vec3& direction,
         const glm::vec3& sceneCenter,
         float sceneRadius,
-        const std::function<void(const glm::mat4& lightSpaceMatrix)>& renderCallback
-    ) {
+        VkCommandBuffer cmd,
+        const std::function<void(VkCommandBuffer, const glm::mat4&)>& renderCallback) {
+
         if (lightIndex < 0 || lightIndex >= m_MaxLights) return;
-        
-        auto& shadowMap = m_ShadowMaps[lightIndex];
-        
-        // Calculate light space matrix for directional light
-        glm::mat4 lightSpaceMatrix = shadowMap->CalculateDirectionalLightMatrix(
-            direction, sceneCenter, sceneRadius
-        );
-        
-        shadowMap->SetLightSpaceMatrix(lightSpaceMatrix);
-        m_LightSpaceMatrices[lightIndex] = lightSpaceMatrix;
-        
-        // Render to shadow map
-        shadowMap->Begin();
-        
-        auto depthShader = ShadowMap::GetDepthShader();
-        depthShader->Bind();
-        depthShader->SetUniformMat4("u_LightSpaceMatrix", lightSpaceMatrix);
-        
-        // Call render callback to draw scene
-        renderCallback(lightSpaceMatrix);
-        
-        depthShader->Unbind();
-        shadowMap->End();
+
+        auto& sm = m_ShadowMaps[lightIndex];
+        glm::mat4 lsm = sm->CalculateDirectionalLightMatrix(direction, sceneCenter, sceneRadius);
+        sm->SetLightSpaceMatrix(lsm);
+        m_LightSpaceMatrices[lightIndex] = lsm;
+
+        sm->Begin(cmd);
+        renderCallback(cmd, lsm);
+        sm->End(cmd);
     }
 
     void ShadowMapManager::RenderSpotShadow(
@@ -227,51 +287,39 @@ namespace GameEngine {
         const glm::vec3& direction,
         float outerConeAngle,
         float range,
-        const std::function<void(const glm::mat4& lightSpaceMatrix)>& renderCallback
-    ) {
+        VkCommandBuffer cmd,
+        const std::function<void(VkCommandBuffer, const glm::mat4&)>& renderCallback) {
+
         if (lightIndex < 0 || lightIndex >= m_MaxLights) return;
-        
-        auto& shadowMap = m_ShadowMaps[lightIndex];
-        
-        // Calculate light space matrix for spot light
-        glm::mat4 lightSpaceMatrix = shadowMap->CalculateSpotLightMatrix(
-            position, direction, outerConeAngle, 0.1f, range
-        );
-        
-        shadowMap->SetLightSpaceMatrix(lightSpaceMatrix);
-        m_LightSpaceMatrices[lightIndex] = lightSpaceMatrix;
-        
-        // Render to shadow map
-        shadowMap->Begin();
-        
-        auto depthShader = ShadowMap::GetDepthShader();
-        depthShader->Bind();
-        depthShader->SetUniformMat4("u_LightSpaceMatrix", lightSpaceMatrix);
-        
-        // Call render callback to draw scene
-        renderCallback(lightSpaceMatrix);
-        
-        depthShader->Unbind();
-        shadowMap->End();
+
+        auto& sm = m_ShadowMaps[lightIndex];
+        glm::mat4 lsm = sm->CalculateSpotLightMatrix(position, direction, outerConeAngle, 0.1f, range);
+        sm->SetLightSpaceMatrix(lsm);
+        m_LightSpaceMatrices[lightIndex] = lsm;
+
+        sm->Begin(cmd);
+        renderCallback(cmd, lsm);
+        sm->End(cmd);
     }
 
-    void ShadowMapManager::BindShadowMaps(uint32_t startSlot) const {
-        for (size_t i = 0; i < m_ShadowMaps.size(); i++) {
-            m_ShadowMaps[i]->BindTexture(startSlot + static_cast<uint32_t>(i));
+    std::vector<VkDescriptorImageInfo> ShadowMapManager::GetShadowMapDescriptors() const {
+        std::vector<VkDescriptorImageInfo> infos;
+        infos.reserve(m_ShadowMaps.size());
+        for (const auto& sm : m_ShadowMaps) {
+            infos.push_back(sm->GetDepthDescriptorInfo());
         }
+        return infos;
     }
 
     ShadowMap* ShadowMapManager::GetShadowMap(int index) {
-        if (index < 0 || index >= static_cast<int>(m_ShadowMaps.size())) {
-            return nullptr;
-        }
+        if (index < 0 || index >= static_cast<int>(m_ShadowMaps.size())) return nullptr;
         return m_ShadowMaps[index].get();
     }
 
     void ShadowMapManager::SetResolution(uint32_t resolution) {
-        for (auto& shadowMap : m_ShadowMaps) {
-            shadowMap = CreateScope<ShadowMap>(resolution);
+        for (auto& sm : m_ShadowMaps) {
+            sm = CreateScope<ShadowMap>(resolution);
         }
     }
 
-}
+} // namespace GameEngine

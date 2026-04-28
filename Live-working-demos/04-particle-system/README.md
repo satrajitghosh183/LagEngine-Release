@@ -1,7 +1,8 @@
 # 04 - Particle System
 
 Simple 3D particle system with collision detection, gravity, and path visualization.
-Renders particles using freeglut with color cycling and variable lifespans.
+Renders particles using Vulkan via the shared VulkanBase library, with color cycling
+and variable lifespans.
 
 ## Features
 
@@ -10,16 +11,18 @@ Renders particles using freeglut with color cycling and variable lifespans.
 - Color cycling through cyan, yellow, and magenta
 - Variable particle lifespans
 - Path trail visualization
+- Runtime GLSL-to-SPIR-V compilation via shaderc
 
 ## Dependencies
 
-- freeglut
-- OpenGL
+- Vulkan SDK (with shaderc)
+- GLFW (provided by VulkanBase)
+- GLM (provided by VulkanBase)
 
 ## Build
 
 ```bash
 mkdir build && cd build
 cmake ..
-make
+cmake --build .
 ```

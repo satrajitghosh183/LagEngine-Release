@@ -1,27 +1,25 @@
 #pragma once
 
 #include "../Core/Base.hpp"
-#include <glad/glad.h>
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
+#include <vector>
 
 namespace GameEngine {
 
     /**
-     * @brief G-Buffer for deferred shading
+     * @brief Vulkan G-Buffer for deferred shading
      *
-     * Stores per-pixel geometry data into multiple render targets:
-     *  - Position (RGB16F): world-space position
-     *  - Normal (RGB16F): world-space normal
-     *  - Albedo (RGBA8): base color + alpha
-     *  - MetallicRoughness (RG8): metallic in R, roughness in G
-     *  - Depth (DEPTH24): depth buffer
+     * Stores per-pixel geometry data into multiple color attachments:
+     *  - Position (R16G16B16A16_SFLOAT): world-space position
+     *  - Normal (R16G16B16A16_SFLOAT): world-space normal
+     *  - Albedo (R8G8B8A8_UNORM): base color + alpha
+     *  - MetallicRoughness (R8G8_UNORM): metallic in R, roughness in G
+     *  - Depth (D32_SFLOAT): depth buffer
      *
-     * Usage:
-     *   gBuffer.BindForWriting();
-     *   // render geometry ...
-     *   gBuffer.Unbind();
-     *   gBuffer.BindTextures();
-     *   // render lighting fullscreen quad ...
+     * Uses a Vulkan render pass with all attachments configured for
+     * optimal tiling and sampling in the lighting pass.
      */
     class GBuffer {
     public:
@@ -31,29 +29,72 @@ namespace GameEngine {
 
         void Init(int width, int height);
         void Resize(int width, int height);
-        void BindForWriting();
-        void BindForReading();
-        void BindTextures(); // Bind all GBuffer textures to texture units 0-3
-        void Unbind();
 
-        uint32_t GetPositionTexture() const { return m_PositionTexture; }
-        uint32_t GetNormalTexture() const { return m_NormalTexture; }
-        uint32_t GetAlbedoTexture() const { return m_AlbedoTexture; }
-        uint32_t GetMetallicRoughnessTexture() const { return m_MetallicRoughnessTexture; }
-        uint32_t GetDepthTexture() const { return m_DepthTexture; }
+        /**
+         * @brief Begin G-Buffer render pass (records to command buffer)
+         */
+        void BeginRenderPass(VkCommandBuffer cmd);
+
+        /**
+         * @brief End G-Buffer render pass
+         */
+        void EndRenderPass(VkCommandBuffer cmd);
+
+        VkRenderPass GetRenderPass() const { return m_RenderPass; }
+        VkFramebuffer GetFramebuffer() const { return m_Framebuffer; }
+
+        VkImageView GetPositionView() const { return m_PositionView; }
+        VkImageView GetNormalView() const { return m_NormalView; }
+        VkImageView GetAlbedoView() const { return m_AlbedoView; }
+        VkImageView GetMetallicRoughnessView() const { return m_MetallicRoughnessView; }
+        VkImageView GetDepthView() const { return m_DepthView; }
+        VkSampler GetSampler() const { return m_Sampler; }
+
+        /**
+         * @brief Get descriptor image info for each G-Buffer texture
+         */
+        VkDescriptorImageInfo GetPositionDescriptor() const;
+        VkDescriptorImageInfo GetNormalDescriptor() const;
+        VkDescriptorImageInfo GetAlbedoDescriptor() const;
+        VkDescriptorImageInfo GetMetallicRoughnessDescriptor() const;
+        VkDescriptorImageInfo GetDepthDescriptor() const;
+
         int GetWidth() const { return m_Width; }
         int GetHeight() const { return m_Height; }
 
     private:
-        void CreateTextures();
+        struct Attachment {
+            VkImage Image = VK_NULL_HANDLE;
+            VmaAllocation Allocation = VK_NULL_HANDLE;
+            VkImageView View = VK_NULL_HANDLE;
+        };
+
+        void CreateAttachments();
+        void CreateRenderPass();
+        void CreateFramebuffer();
+        void CreateSampler();
         void Cleanup();
 
-        uint32_t m_FBO = 0;
-        uint32_t m_PositionTexture = 0;         // RGB16F: world position
-        uint32_t m_NormalTexture = 0;            // RGB16F: world normal
-        uint32_t m_AlbedoTexture = 0;            // RGBA8: albedo + alpha
-        uint32_t m_MetallicRoughnessTexture = 0; // RG8: metallic, roughness
-        uint32_t m_DepthTexture = 0;             // DEPTH24
+        Attachment CreateColorAttachment(VkFormat format);
+        Attachment CreateDepthAttachment(VkFormat format);
+        void DestroyAttachment(Attachment& att);
+
+        Attachment m_Position;
+        Attachment m_Normal;
+        Attachment m_Albedo;
+        Attachment m_MetallicRoughness;
+        Attachment m_Depth;
+
+        VkImageView m_PositionView = VK_NULL_HANDLE;
+        VkImageView m_NormalView = VK_NULL_HANDLE;
+        VkImageView m_AlbedoView = VK_NULL_HANDLE;
+        VkImageView m_MetallicRoughnessView = VK_NULL_HANDLE;
+        VkImageView m_DepthView = VK_NULL_HANDLE;
+
+        VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+        VkFramebuffer m_Framebuffer = VK_NULL_HANDLE;
+        VkSampler m_Sampler = VK_NULL_HANDLE;
+
         int m_Width = 0, m_Height = 0;
     };
 

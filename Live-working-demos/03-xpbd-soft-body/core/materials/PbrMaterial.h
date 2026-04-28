@@ -1,6 +1,9 @@
 //
 // Created by barth on 19/10/23.
 //
+// Vulkan port: PBR material stores parameters but does not issue GL calls.
+// The Vulkan renderer reads material properties to build push constants.
+//
 
 #ifndef FEATHERGL_PBRMATERIAL_H
 #define FEATHERGL_PBRMATERIAL_H
@@ -12,77 +15,33 @@
 class PbrMaterial : public Material {
 public:
     explicit PbrMaterial(std::shared_ptr<Scene> scene) : Material("./assets/shaders/pbr"), _scene(scene) {
-        std::string maxPointLights = std::to_string(Settings::MAX_POINT_LIGHTS);
-        shader()->setDefine((std::string("MAX_POINT_LIGHTS ") + maxPointLights).c_str());
-
-        std::string maxDirectionalLights = std::to_string(Settings::MAX_DIRECTIONAL_LIGHTS);
-        shader()->setDefine((std::string("MAX_DIRECTIONAL_LIGHTS ") + maxDirectionalLights).c_str());
     }
 
     void bind() override {
         Material::bind();
-
-        if (_albedoTexture != nullptr) shader()->bindTexture("albedoTexture", _albedoTexture, 0);
-        if (_roughnessTexture != nullptr) shader()->bindTexture("roughnessTexture", _roughnessTexture, 1);
-        if (_normalTexture != nullptr) shader()->bindTexture("normalTexture", _normalTexture, 2);
-        if (_shadowRenderer != nullptr) {
-            shader()->bindTexture("shadowMap", _shadowRenderer->depthTexture(), 3);
-            glm::mat4 lightSpaceMatrix = _shadowRenderer->projectionViewMatrix();
-            shader()->setMat4("lightSpaceMatrix", &lightSpaceMatrix);
-            shader()->setVec3("lightDirection", _shadowRenderer->directionalLight()->getDirection());
-        }
-        shader()->setVec3("cameraPosition", _scene->activeCamera()->position());
-        shader()->setBool("lightingEnabled", _lightingEnabled);
-
+        // All uniform data is stored in CPU-side maps via Shader setters.
+        // The Vulkan renderer reads material albedoColor / metallic / roughness
+        // directly and builds push constants from them.
         shader()->setVec3("albedoColor", _albedoColor);
-        shader()->setVec3("ambientColor", _ambientColor);
-        if(_hasAlphaColor) shader()->setVec3("alphaColor", _alphaColor);
-
         shader()->setFloat("metallic", metallic);
         shader()->setFloat("roughness", roughness);
-        shader()->setFloat("ao", ao);
-
-        auto *pointLights = _scene->pointLights();
-        shader()->setInt("pointLightCount", (int) pointLights->size());
-        for (int i = 0; i < pointLights->size(); i++) {
-            auto light = pointLights->at(i);
-            shader()->setVec3(("pointLights[" + std::to_string(i) + "].position").c_str(),
-                              light->transform()->position());
-            shader()->setVec3(("pointLights[" + std::to_string(i) + "].color").c_str(), light->color());
-            shader()->setFloat(("pointLights[" + std::to_string(i) + "].intensity").c_str(), light->intensity());
-        }
-
-        auto *directionalLights = _scene->directionalLights();
-        shader()->setInt("directionalLightCount", (int) directionalLights->size());
-        for (int i = 0; i < directionalLights->size(); i++) {
-            auto light = directionalLights->at(i);
-            shader()->setVec3(("directionalLights[" + std::to_string(i) + "].direction").c_str(),
-                              light->getDirection());
-            shader()->setVec3(("directionalLights[" + std::to_string(i) + "].color").c_str(),
-                              light->color());
-            shader()->setFloat(("directionalLights[" + std::to_string(i) + "].intensity").c_str(),
-                               light->intensity());
-        }
     }
 
     void unbind() override {
         Material::unbind();
-        if (_shadowRenderer != nullptr) _shadowRenderer->depthTexture()->unbind();
     }
 
     void setLightingEnabled(bool enabled) { _lightingEnabled = enabled; }
 
-    void setMetallic(float metallic) { this->metallic = metallic; }
+    void setMetallic(float m) { this->metallic = m; }
 
-    void setRoughness(float roughness) { this->roughness = roughness; }
+    void setRoughness(float r) { this->roughness = r; }
 
     void setRoughnessTexture(Texture *texture) {
-        if (_roughnessTexture == nullptr) shader()->setDefine("ROUGHNESS_TEXTURE");
         _roughnessTexture = texture;
     }
 
     void receiveShadows(std::shared_ptr<ShadowRenderer> shadowRenderer) {
-        if (_shadowRenderer == nullptr) shader()->setDefine("SHADOW_MAP");
         _shadowRenderer = shadowRenderer;
     }
 
@@ -90,15 +49,14 @@ public:
         _albedoColor.x = r;
         _albedoColor.y = g;
         _albedoColor.z = b;
+        setAlbedoColorInternal(_albedoColor);
     }
 
     void setAlbedoTexture(Texture *texture) {
-        if (_albedoTexture == nullptr) shader()->setDefine("ALBEDO_TEXTURE");
         _albedoTexture = texture;
     }
 
     void setNormalTexture(Texture *texture) {
-        if (_normalTexture == nullptr) shader()->setDefine("NORMAL_TEXTURE");
         _normalTexture = texture;
     }
 
@@ -108,6 +66,9 @@ public:
         _ambientColor.z = b;
     }
 
+    glm::vec3 getAlbedoColor() const { return _albedoColor; }
+    float getMetallic() const { return metallic; }
+    float getRoughness() const { return roughness; }
 
 private:
     std::shared_ptr<Scene> _scene;

@@ -44,11 +44,8 @@ namespace GameEngine {
             matJson["roughness"] = m_Material->GetRoughness();
             matJson["ao"] = m_Material->GetAO();
 
-            // Serialize shader path if available
-            auto shader = m_Material->GetShader();
-            if (shader) {
-                matJson["shaderName"] = shader->GetName();
-            }
+            // Vulkan materials carry pipeline references rather than a Shader
+            // object, so shader-name serialization is no longer applicable.
 
             j["material"] = matJson;
         }

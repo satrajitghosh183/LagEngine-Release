@@ -5,7 +5,7 @@
 #include "../../Engine/Graphics/RenderCommand.hpp"
 #include "../../Engine/Core/Time.hpp"
 #include <imgui.h>
-#include <glad/glad.h>
+// glad include removed (Vulkan migration)
 
 using namespace GameEngine;
 
